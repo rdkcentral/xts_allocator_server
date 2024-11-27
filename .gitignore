@@ -1,0 +1,5 @@
+*.lastlogin
+*__pycache__*
+*.vscode*
+*build*
+*.egg*
