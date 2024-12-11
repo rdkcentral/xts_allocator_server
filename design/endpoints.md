@@ -1,6 +1,3 @@
-<div><img src="../logo.png" width="150" style="border-radius: 50%;"/></div>
-</br>
-
 # Endpoints Documentation
 
 ---
