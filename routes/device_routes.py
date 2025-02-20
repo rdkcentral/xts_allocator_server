@@ -52,6 +52,16 @@ async def list_slots_filters(request):
     finally:
         session.close()
 
+def update_slot_fields(slot, data):
+    if "rackName" in data:
+        slot.rack_name = data["rackName"]
+    if "slotName" in data:
+        slot.slot_name = data["slotName"]
+    if "description" in data:
+        slot.description = data["description"]
+    if "tags" in data:
+        slot.tags = ",".join(data["tags"]) if isinstance(data["tags"], list) else data["tags"]
+
 @device_routes.post("/add_slot")
 async def add_slot(request):
     session = SessionLocal()
@@ -65,13 +75,8 @@ async def add_slot(request):
         if "rackName" not in data or "slotName" not in data:
             return json({"error": "Missing required fields: rackName and slotName"}, status=400)
 
-        new_slot = Device(
-            id=next_id,
-            rack_name=data["rackName"],
-            slot_name=data["slotName"],
-            description=data.get("description", ""),
-            tags=",".join(data.get("tags", []))
-        )
+        new_slot = Device(id=next_id, rack_name="", slot_name="", description="", tags="")
+        update_slot_fields(new_slot, data)
         session.add(new_slot)
         session.commit()
 
@@ -97,17 +102,9 @@ async def update_slot_info(request):
         if not slot:
             return json({"error": "Slot not found"}, status=404)
 
-        #only update the provided fields
-        if "rackName" in data:
-            slot.rack_name = data["rackName"]
-        if "slotName" in data:
-            slot.slot_name = data["slotName"]
-        if "description" in data:
-            slot.description = data["description"]
-        if "tags" in data:
-            slot.tags = ",".join(data["tags"])
-
+        update_slot_fields(slot, data)
         session.commit()
+        
         return json({"message": "Slot updated successfully"}, status=200)
 
     except Exception as e:
