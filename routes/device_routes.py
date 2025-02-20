@@ -1,5 +1,6 @@
 from sanic import Blueprint
 from sanic.response import json
+from sqlalchemy import func
 from models import SessionLocal, Device
 
 device_routes = Blueprint("device_routes")
@@ -51,7 +52,37 @@ async def list_slots_filters(request):
     finally:
         session.close()
 
-# take in POSTed data and add or remove slot information to the database
+@device_routes.post("/add_slot")
+async def add_slot(request):
+    session = SessionLocal()
+    try:
+        data = request.json
+
+        # get the next available slot ID
+        max_id = session.query(func.max(Device.id)).scalar()
+        next_id = (max_id + 1) if max_id else 1  #if no records then start from 1
+
+        if "rackName" not in data or "slotName" not in data:
+            return json({"error": "Missing required fields: rackName and slotName"}, status=400)
+
+        new_slot = Device(
+            id=next_id,
+            rack_name=data["rackName"],
+            slot_name=data["slotName"],
+            description=data.get("description", ""),
+            tags=",".join(data.get("tags", []))
+        )
+        session.add(new_slot)
+        session.commit()
+
+        return json({"message": "Slot added successfully", "slot_id": next_id}, status=201)
+
+    except Exception as e:
+        session.rollback()
+        return json({"error": str(e)}, status=500)
+    finally:
+        session.close()
+
 @device_routes.post("/update_slot")
 async def update_slot_info(request):
     session = SessionLocal()
@@ -91,26 +122,17 @@ async def clear_slot_info(request):
     try:
         data = request.json
         slot_id = data.get("slot_id")
-        field = data.get("field")
 
-        if not slot_id or not field:
-            return json({"error": "Slot ID and field name are required"}, status=400)
+        if not slot_id:
+            return json({"error": "Slot ID is required"}, status=400)
 
         slot = session.query(Device).filter(Device.id == slot_id).first()
         if not slot:
             return json({"error": "Slot not found"}, status=404)
 
-        # Only allow clearing specific fields
-        allowed_fields = ["description", "tags"]
-        if field not in allowed_fields:
-            return json({"error": f"Only these fields can be cleared: {allowed_fields}"}, status=400)
-
-        # Set the field to an empty value
-        setattr(slot, field, "" if field == "description" else None)  #empty string for description, NULL for tags
+        session.delete(slot)
         session.commit()
-
-        return json({"message": f"{field} cleared successfully"}, status=200)
-
+        return json({"message": f"Slot {slot_id} deleted successfully"}, status=200)
     except Exception as e:
         session.rollback()
         return json({"error": str(e)}, status=500)
