@@ -68,19 +68,18 @@ async def add_slot(request):
     try:
         data = request.json
 
-        # get the next available slot ID
-        max_id = session.query(func.max(Device.id)).scalar()
-        next_id = (max_id + 1) if max_id else 1  #if no records then start from 1
-
         if "rackName" not in data or "slotName" not in data:
             return json({"error": "Missing required fields: rackName and slotName"}, status=400)
 
-        new_slot = Device(id=next_id, rack_name="", slot_name="", description="", tags="")
+        new_slot = Device(rack_name="", slot_name="", description="", tags="")
         update_slot_fields(new_slot, data)
         session.add(new_slot)
         session.commit()
 
-        return json({"message": "Slot added successfully", "slot_id": next_id}, status=201)
+        # to get the new generated id from the db
+        session.refresh(new_slot)
+
+        return json({"message": "Slot added successfully", "slot_id": new_slot.id}, status=201)
 
     except Exception as e:
         session.rollback()
