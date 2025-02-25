@@ -115,3 +115,124 @@ Filters and retrieves device slots based on the provided criteria.
   Lists the slots that match the criteria
 
 ---
+
+## 5. Add Slot
+
+### `POST /add_slot`
+
+**Description:**  
+Adds a new slot in the database.
+
+**Request Parameters:**
+- **`rackName`** (string, required); The rack where the slot is located.
+- **`platform`** (string, optional): The platform associated with the slot.
+- **`description`** (string, optional): Additional details about the slot.
+- **`tags`** (list of strings, optional): Tags associated with the slots.
+- **`state`** (string, optional, default: "free"): The state of the slot ("free" or "allocated").
+- **`owner_email`** (string, optional): The email of the owner (if allocated).
+
+**Response:**
+- **Success (201):**
+  ```json
+  {
+      "message": "Slot added successfully.",
+  }
+
+- **Error (400):**
+  ```json
+  {
+      "message": "Missing required fields: rackName and slotName."
+  }
+
+- **Error (500):**
+  ```json
+  {
+      "message": "Database error message."
+
+  }    
+
+---
+
+## 6. Update Slot
+
+### `POST /update_slot`
+
+**Description:**  
+Updates an existing slot's details based on the provided slot_id. Only specified fields will be updated.
+
+**Request Parameters:**
+- **`slot_id`** (integer, required): The ID of the slot to update.
+- **`rackName`** (string, required); The new rack name.
+- **`platform`** (string, optional): The updated platform.
+- **`description`** (string, optional): The updated description.
+- **`tags`** (list of strings, optional): The updated list of tags.
+- **`state`** (string, optional, default: "free"): The new state of the slot ("free" or "allocated").
+- **`owner_email`** (string, optional): The updated owner email(if allocated).
+
+**Response:**
+- **Success (200):**
+  ```json
+  {
+      "message": "Slot updated successfully.",
+  }
+
+- **Error (400):**
+  ```json
+  {
+      "message": "Slot id is required."
+  }
+
+- **Error (404):**
+  ```json
+  {
+      "message": "Slot not found."
+
+  } 
+
+- **Error (500):**
+  ```json
+  {
+      "message": "Database error message."
+
+  } 
+
+---
+
+## 7. Delete Slot
+
+### `POST /delete_slot`
+
+**Description:**  
+Deletes an existing slot from the database based on the provided slot_id.
+
+**Request Parameters:**
+- **`slot_id`** (integer, required): The ID of the slot to delete.
+
+**Response:**
+- **Success (200):**
+  ```json
+  {
+      "message": "Slot deleted successfully.",
+  }
+
+- **Error (400):**
+  ```json
+  {
+      "message": "Slot id is required."
+  }
+
+- **Error (404):**
+  ```json
+  {
+      "message": "Slot not found."
+
+  } 
+
+- **Error (500):**
+  ```json
+  {
+      "message": "Database error message."
+
+  } 
+
+---
