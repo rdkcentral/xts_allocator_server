@@ -7,6 +7,7 @@ device_routes = Blueprint("device_routes")
 
 @device_routes.get("/list_slots")
 async def list_slots(request):
+    """Retrieve all available slots from the database."""
     session = SessionLocal()
     try:
         slots = session.query(Device).all()
@@ -26,6 +27,7 @@ async def list_slots(request):
 
 @device_routes.post("/list_slots")
 async def list_slots_filters(request):
+    """Retrieve slots from the database based on specific filter criteria."""
     session = SessionLocal()
     try:
         criteria = request.json
@@ -53,6 +55,7 @@ async def list_slots_filters(request):
         session.close()
 
 def update_slot_fields(slot, data):
+    """Helper function to update a slot's attributes."""
     if "rackName" in data:
         slot.rack_name = data["rackName"]
     if "slotName" in data:
@@ -64,6 +67,7 @@ def update_slot_fields(slot, data):
 
 @device_routes.post("/add_slot")
 async def add_slot(request):
+    """Add a new slot to the database."""
     session = SessionLocal()
     try:
         data = request.json
@@ -89,6 +93,7 @@ async def add_slot(request):
 
 @device_routes.post("/update_slot")
 async def update_slot_info(request):
+    """Update an existing slot in the database."""
     session = SessionLocal()
     try:
         data = request.json
@@ -112,8 +117,9 @@ async def update_slot_info(request):
     finally:
         session.close()
 
-@device_routes.post("/clear_slot_field")
-async def clear_slot_info(request):
+@device_routes.post("/delete_slot")
+async def delete_slot(request):
+    """Delete a slot from the database."""
     session = SessionLocal()
     try:
         data = request.json
