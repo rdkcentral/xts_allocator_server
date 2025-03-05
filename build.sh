@@ -6,8 +6,6 @@ set -e
 SCRIPT_NAME="app.py"
 OUTPUT_DIR="dist"
 BINARY_NAME="xts_allocator"
-TEMPLATES_SOURCE="templates/style.css"
-TEMPLATES_DEST="templates"
 VENV_DIR="venv"
 REQUIREMENTS_FILE="requirements.txt"
 REQUIRED_PYTHON_VERSION="3.8+"
@@ -91,8 +89,6 @@ function install_dependencies() {
 function build_binary() {
     echo "Building binary with PyInstaller..."
     pyinstaller --onefile --noconsole --name "$BINARY_NAME" \
-        --distpath "$OUTPUT_DIR" \
-        --add-data "$TEMPLATES_SOURCE:$TEMPLATES_DEST" \
         "$SCRIPT_NAME"
     echo "Build complete. Binary is located in the '$OUTPUT_DIR' directory."
 }
