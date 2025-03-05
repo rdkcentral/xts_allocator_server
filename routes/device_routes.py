@@ -23,8 +23,8 @@ async def list_slots(request):
         session.close()
 
 
-@device_routes.post("/search_slots")
-async def search_slots(request):
+@device_routes.post("/list_slots")
+async def list_slots_filters(request):
     session = SessionLocal()
     try:
         criteria = request.json

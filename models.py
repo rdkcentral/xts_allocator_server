@@ -1,8 +1,9 @@
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+from config import Config
 
-DATABASE_URL = "sqlite:///xts_allocator.db"
+DATABASE_URL = Config.DATABASE_URL
 
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, echo=True)
@@ -34,6 +35,3 @@ class AllocationHistory(Base):
     device = relationship("Device", back_populates="allocations")
 
 Device.allocations = relationship("AllocationHistory", back_populates="device")
-
-# what database url
-# look at dynaconf
