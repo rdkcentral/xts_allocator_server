@@ -1,6 +1,3 @@
-<div><img src="logo.png" width="150" style="border-radius: 50%;"/></div>
-</br>
-
 # XTS Allocator Server
 
 The XTS Allocator Server is a tool for managing device allocation within a shared testing environment. It allows users to allocate, deallocate, and search for devices while preventing conflicts between users.
