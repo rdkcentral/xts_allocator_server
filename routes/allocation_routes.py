@@ -6,6 +6,7 @@ allocation_routes = Blueprint("allocation_routes")
 
 @allocation_routes.post("/allocate_slot")
 async def allocate_slot(request):
+    """Allocate a free slot to a user."""
     session = SessionLocal()
     try:
         data = request.json
@@ -48,6 +49,7 @@ async def allocate_slot(request):
 
 @allocation_routes.post("/deallocate_slot")
 async def deallocate_slot(request):
+    """Deallocate a previously allocated slot, making it available to other users."""
     session = SessionLocal()
     try:
         data = request.json
