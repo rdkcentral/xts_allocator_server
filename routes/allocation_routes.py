@@ -1,6 +1,6 @@
 from sanic import Blueprint
 from sanic.response import json
-from models import SessionLocal, Device, AllocationHistory
+from models import SessionLocal, Device
 
 allocation_routes = Blueprint("allocation_routes")
 
