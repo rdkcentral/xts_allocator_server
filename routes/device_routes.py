@@ -1,6 +1,5 @@
 from sanic import Blueprint
 from sanic.response import json
-from sqlalchemy import func
 from models import SessionLocal, Device
 
 device_routes = Blueprint("device_routes")

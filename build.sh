@@ -3,11 +3,14 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-SCRIPT_NAME="app.py"
-OUTPUT_DIR="dist"
+MY_PATH="$(realpath ${BASH_SOURCE[0]})"
+MY_DIR="$(dirname ${MY_PATH})"
+
+SCRIPT_NAME="${MY_DIR}/app.py"
+OUTPUT_DIR="${MY_DIR}/bin"
 BINARY_NAME="xts_allocator"
-VENV_DIR="venv"
-REQUIREMENTS_FILE="requirements.txt"
+VENV_DIR="${MY_DIR}/venv"
+REQUIREMENTS_FILE="${MY_DIR}/requirements.txt"
 REQUIRED_PYTHON_VERSION="3.8+"
 
 # Function to check if a version meets requirements
@@ -59,19 +62,10 @@ function check_python_version() {
 
 function setup_venv() {
     echo "Setting up Python virtual environment..."
-    if [ -d "$VENV_DIR" ]; then
-        echo "Virtual environment already exists. Checking Python version..."
+    if [ -e "$VENV_DIR/bin/activate" ]; then
+        echo "Reusing existing virtual environment"
         source "$VENV_DIR/bin/activate"
-        local venv_python_version
-        venv_python_version=$(python --version 2>&1 | awk '{print $2}')
-        if version_check "$venv_python_version" "$REQUIRED_PYTHON_VERSION"; then
-            echo "Reusing existing virtual environment with Python version: $venv_python_version"
-            return
-        else
-            echo "Python version in the virtual environment does not meet requirements. Recreating..."
-            deactivate
-            rm -rf "$VENV_DIR"
-        fi
+        return
     fi
     python3 -m venv "$VENV_DIR"
     source "$VENV_DIR/bin/activate"
@@ -80,16 +74,32 @@ function setup_venv() {
 function install_dependencies() {
     if [ -f "$REQUIREMENTS_FILE" ]; then
         echo "Installing dependencies..."
-        pip install -r "$REQUIREMENTS_FILE"
+        pip install -qr "$REQUIREMENTS_FILE"
     else
         echo "No requirements.txt found. Skipping dependency installation."
     fi
 }
 
+function setup_db() {
+    echo "Setting up database"
+    python3 "${MY_DIR}/database_setup.py"
+    if [[ "$?" == "0" ]];then
+        echo "Database set up successfully"
+    else
+        echo "Failed to set up database"
+    fi
+}
+
 function build_binary() {
     echo "Building binary with PyInstaller..."
-    pyinstaller --onefile --noconsole --name "$BINARY_NAME" \
-        "$SCRIPT_NAME"
+    pyinstaller --onefile \
+                --noconsole \
+                --name "${BINARY_NAME}" \
+                --collect-all "sanic" \
+                --collect-all "tracerite" \
+                --add-data "./templates/index.html:./templates/index.html" \
+                --distpath "${OUTPUT_DIR}" \
+                "${SCRIPT_NAME}"
     echo "Build complete. Binary is located in the '$OUTPUT_DIR' directory."
 }
 
@@ -103,6 +113,7 @@ function main() {
     check_python_version
     setup_venv
     install_dependencies
+    setup_db
     build_binary
     clean_up
     echo "Build process completed successfully!"
