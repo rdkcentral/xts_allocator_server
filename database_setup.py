@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from models import Base, engine
 
 # creates tables in the database
