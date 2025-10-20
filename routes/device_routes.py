@@ -1,9 +1,6 @@
 from sanic import Blueprint
 from sanic.response import json
-<<<<<<< HEAD
 from sqlalchemy import func
-=======
->>>>>>> fbca4c159573e1b328f31d1278bb8633fd74a9c6
 from models import SessionLocal, Device
 
 device_routes = Blueprint("device_routes")
@@ -16,10 +13,13 @@ async def list_slots(request):
         slots = session.query(Device).all()
         slots_list = [
             {
+                "slot_id": slot.id,
                 "rackName": slot.rack_name,
                 "slotName": slot.slot_name,
                 "description": slot.description,
-                "tags": slot.tags.split(",") if slot.tags else []
+                "tags": slot.tags.split(",") if slot.tags else [],
+                "state": slot.state,
+                "owner_email": slot.owner_email,
             }
             for slot in slots
         ]
@@ -46,10 +46,13 @@ async def list_slots_filters(request):
 
         matching_slots = [
             {
+                "slot_id": slot.id,
                 "rackName": slot.rack_name,
                 "slotName": slot.slot_name,
                 "description": slot.description,
-                "tags": slot.tags.split(",") if slot.tags else []
+                "tags": slot.tags.split(",") if slot.tags else [],
+                "state": slot.state,
+                "owner_email": slot.owner_email
             }
             for slot in query.all()
         ]
@@ -78,8 +81,22 @@ async def add_slot(request):
         if "rackName" not in data or "slotName" not in data:
             return json({"error": "Missing required fields: rackName and slotName"}, status=400)
 
-        new_slot = Device(rack_name="", slot_name="", description="", tags="")
+        new_slot = Device(rack_name="", 
+                          slot_name="", 
+                          description="", 
+                          tags="", 
+                          state="free",     #default state
+                          owner_email=None) #default owner
         update_slot_fields(new_slot, data)
+        
+        # override state if provided
+        if "state" in data and data["state"] in ["free", "allocated"]:
+            new_slot.state = data["state"]
+
+        # override owner_email if provided
+        if "owner_email" in data:
+            new_slot.owner_email = data["owner_email"]
+            
         session.add(new_slot)
         session.commit()
 
