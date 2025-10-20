@@ -1,5 +1,9 @@
 sanic==24.6.0
 SQLAlchemy==2.0.36
 requests==2.31.0
+<<<<<<< HEAD
 sanic-ext==23.12.0
 pyinstaller==6.11.1
+=======
+pyinstaller==6.11.1
+>>>>>>> fbca4c159573e1b328f31d1278bb8633fd74a9c6
