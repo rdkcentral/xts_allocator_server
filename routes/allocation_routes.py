@@ -1,6 +1,6 @@
 from sanic import Blueprint
 from sanic.response import json
-from models import SessionLocal, Device
+from models import SessionLocal, Device, AllocationHistory
 
 allocation_routes = Blueprint("allocation_routes")
 
@@ -18,31 +18,41 @@ async def allocate_slot(request):
 
         query = session.query(Device).filter(Device.state == "free")
 
+    # Allocate by slot_id if provided
         if "id" in slot_params:
-            query = query.filter(Device.id == slot_params["id"])
-        
-        elif "platform" in slot_params:
-            query = query.filter(Device.platform == slot_params["platform"])
+            slot_id = slot_params["id"]
+            slot = session.query(Device).filter(Device.id == slot_id).first()
+            if not slot:
+                return json({"message": f"Slot with id {slot_id} not found"}, status=404)
+            if slot.state != "free":
+                return json({"message": f"Slot {slot_id} is already allocated"}, status=409)
+
+        # Allocate by platform/tags
+        else:
+            query = session.query(Device).filter(Device.state == "free", Device.platform == slot_params["platform"])
             if "tags" in slot_params:
                 tags = ",".join(slot_params["tags"])
                 query = query.filter(Device.tags.contains(tags))
+            slot = query.first()
+            if not slot:
+                return json({"message": "No free slot matches the criteria"}, status=404)
 
-        # gets the first matching device
-        slot = query.first()
+        # Allocate the slot
+        slot.state = "allocated"
+        slot.owner_email = user.get("email")
+        session.commit()
+        return json({
+            "message": "Slot allocated successfully",
+            "slot_id": slot.id,
+            "rackName": slot.rack_name,
+            "slotName": slot.slot_name,
+            "state": slot.state,
+            "owner_email": slot.owner_email
+        }, status=200)
 
-        if slot:
-            # allocate the device
-            slot.state = "allocated"
-            slot.owner_email = user["email"]
-            session.commit()
-            return json({
-                "message": "Slot allocated",
-                "slot_info": f"Slot ID: {slot.id}",
-                "id": slot.id
-            }, status=200)
-        
-        return json({"message": "Slot unavailable"}, status=404)
-
+    except Exception as e:
+        session.rollback()
+        return json({"message": "Internal server error", "error": str(e)}, status=500)
     finally:
         session.close()
 
