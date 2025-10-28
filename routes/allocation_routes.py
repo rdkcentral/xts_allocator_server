@@ -35,7 +35,7 @@ async def allocate_slot(request):
                 query = query.filter(Device.tags.contains(tags))
             slot = query.first()
             if not slot:
-                return json({"message": "No free slot matches the criteria"}, status=409)
+                return json({"message": "No free slot matches the criteria", "slots":[]}, status=200)
 
         # Allocate the slot
         slot.state = "allocated"
