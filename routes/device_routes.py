@@ -16,6 +16,7 @@ async def list_slots(request):
                 "slot_id": slot.id,
                 "rackName": slot.rack_name,
                 "slotName": slot.slot_name,
+                "platform": slot.platform,
                 "description": slot.description,
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
@@ -49,6 +50,7 @@ async def list_slots_filters(request):
                 "slot_id": slot.id,
                 "rackName": slot.rack_name,
                 "slotName": slot.slot_name,
+                "platform": slot.platform,
                 "description": slot.description,
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
@@ -66,6 +68,8 @@ def update_slot_fields(slot, data):
         slot.rack_name = data["rackName"]
     if "slotName" in data:
         slot.slot_name = data["slotName"]
+    if "platform" in data:
+        slot.platform = data["platform"]
     if "description" in data:
         slot.description = data["description"]
     if "tags" in data:
@@ -82,7 +86,8 @@ async def add_slot(request):
             return json({"error": "Missing required fields: rackName and slotName"}, status=400)
 
         new_slot = Device(rack_name="", 
-                          slot_name="", 
+                          slot_name="",
+                          platform="", 
                           description="", 
                           tags="", 
                           state="free",     #default state
