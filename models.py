@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import JSON, create_engine, Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from config import Config
@@ -20,6 +20,7 @@ class Device(Base):
     platform = Column(String, nullable=True)
     state = Column(String, default="free")
     owner_email = Column(String, nullable=True)
+    configuration = Column(JSON, nullable=True)
 
 class AllocationHistory(Base):
     __tablename__ = "allocation_history"

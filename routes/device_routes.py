@@ -21,6 +21,7 @@ async def list_slots(request):
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
                 "owner_email": slot.owner_email,
+                "configuration":slot.configuration or {},
             }
             for slot in slots
         ]
@@ -54,7 +55,8 @@ async def list_slots_filters(request):
                 "description": slot.description,
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
-                "owner_email": slot.owner_email
+                "owner_email": slot.owner_email,
+                "configuration": slot.configuration or {},
             }
             for slot in query.all()
         ]
@@ -74,6 +76,8 @@ def update_slot_fields(slot, data):
         slot.description = data["description"]
     if "tags" in data:
         slot.tags = ",".join(data["tags"]) if isinstance(data["tags"], list) else data["tags"]
+    if "configuration" in data:
+        slot.configuratio = data["configuration"] or {}
 
 @device_routes.post("/add_slot")
 async def add_slot(request):
@@ -91,7 +95,8 @@ async def add_slot(request):
                           description="", 
                           tags="", 
                           state="free",     #default state
-                          owner_email=None) #default owner
+                          owner_email=None, #default owner
+                          configuration={},)
         update_slot_fields(new_slot, data)
         
         # override state if provided
@@ -104,6 +109,7 @@ async def add_slot(request):
             
         session.add(new_slot)
         session.commit()
+        session.refresh(new_slot)
 
         # to get the new generated id from the db
         session.refresh(new_slot)
