@@ -1,6 +1,6 @@
 from sanic import Blueprint
 from sanic.response import json
-from models import SessionLocal, Device, AllocationHistory
+from models import SessionLocal, Device, AllocationHistory, Rack
 
 allocation_routes = Blueprint("allocation_routes")
 
@@ -55,7 +55,8 @@ async def allocate_slot(request):
             return json({
                 "message": "Slot allocated successfully",
                 "slot_id": slot.id,
-                "rackName": slot.rack_name,
+                "rackName": slot.rack.name,
+                "rackId": slot.rack_id,
                 "slotName": slot.slot_name,
                 "state": slot.state,
                 "owner_email": slot.owner_email
