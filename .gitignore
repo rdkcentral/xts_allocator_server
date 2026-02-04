@@ -3,3 +3,8 @@
 *.vscode*
 *build*
 *.egg*
+venv/
+*.pyc
+*.db
+xts_allocator.db
+*.log

@@ -16,9 +16,7 @@ async def allocate_slot(request):
         if not slot_params.get("id") and not slot_params.get("platform"):
             return json({"message": "Either 'id' or 'platform' must be provided"}, status=400)
 
-        query = session.query(Device).filter(Device.state == "free")
-
-    # Allocate by slot_id if provided
+        # Allocate by slot_id if provided
         if "id" in slot_params:
             slot_id = slot_params["id"]
             slot = session.query(Device).filter(Device.id == slot_id).first()
@@ -26,6 +24,19 @@ async def allocate_slot(request):
                 return json({"message": f"Slot with id {slot_id} not found"}, status=404)
             if slot.state != "free":
                 return json({"message": f"Slot {slot_id} is already allocated"}, status=409)
+            
+            # Allocate the slot
+            slot.state = "allocated"
+            slot.owner_email = user.get("email")
+            session.commit()
+            return json({
+                "message": "Slot allocated successfully",
+                "slot_id": slot.id,
+                "rackName": slot.rack_name,
+                "slotName": slot.slot_name,
+                "state": slot.state,
+                "owner_email": slot.owner_email
+            }, status=200)
 
         # Allocate by platform/tags
         else:
@@ -36,19 +47,19 @@ async def allocate_slot(request):
             slot = query.first()
             if not slot:
                 return json({"message": "No free slot matches the criteria", "slots":[]}, status=200)
-
-        # Allocate the slot
-        slot.state = "allocated"
-        slot.owner_email = user.get("email")
-        session.commit()
-        return json({
-            "message": "Slot allocated successfully",
-            "slot_id": slot.id,
-            "rackName": slot.rack_name,
-            "slotName": slot.slot_name,
-            "state": slot.state,
-            "owner_email": slot.owner_email
-        }, status=200)
+            
+            # Allocate the slot
+            slot.state = "allocated"
+            slot.owner_email = user.get("email")
+            session.commit()
+            return json({
+                "message": "Slot allocated successfully",
+                "slot_id": slot.id,
+                "rackName": slot.rack_name,
+                "slotName": slot.slot_name,
+                "state": slot.state,
+                "owner_email": slot.owner_email
+            }, status=200)
 
     except Exception as e:
         session.rollback()
@@ -78,5 +89,9 @@ async def deallocate_slot(request):
         slot.owner_email = None
         session.commit()
         return json({"message": f"Slot {slot_id} is now free"}, status=200)
+    
+    except Exception as e:
+        session.rollback()
+        return json({"message": "Internal server error", "error": str(e)}, status=500)
     finally:
         session.close()
