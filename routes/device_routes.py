@@ -16,12 +16,17 @@ async def list_slots(request):
                 "slot_id": slot.id,
                 "rackName": slot.rack.name,
                 "rackId": slot.rack_id,
+                "rackLocation": slot.rack.location,
+                "rackBuilding": slot.rack.building,
                 "slotName": slot.slot_name,
                 "platform": slot.platform,
                 "description": slot.description,
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
                 "owner_email": slot.owner_email,
+                "make": slot.make,
+                "model": slot.model,
+                "external_equipment": slot.external_equipment or [],
             }
             for slot in slots
         ]

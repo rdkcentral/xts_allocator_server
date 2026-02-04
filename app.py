@@ -1,6 +1,7 @@
 from sanic import Sanic, response
 from routes.allocation_routes import allocation_routes
 from routes.device_routes import device_routes
+from routes.rack_routes import rack_routes
 import os
 
 app = Sanic("XTS_Allocator_Server")
@@ -8,6 +9,7 @@ app = Sanic("XTS_Allocator_Server")
 # Register routes
 app.blueprint(allocation_routes)
 app.blueprint(device_routes)
+app.blueprint(rack_routes)
 app.static('/logo.png', './logo.png')
 
 # Serve the main page
