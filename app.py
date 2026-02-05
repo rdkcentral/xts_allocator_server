@@ -4,6 +4,8 @@ from routes.device_routes import device_routes
 from routes.rack_routes import rack_routes
 from routes.export_routes import export_routes
 from routes.health_routes import health_routes
+from routes.usage_routes import usage_routes
+from routes.federation_routes import federation_routes
 from models import SessionLocal, Device
 from state_machine import DeviceState, transition_device
 from logging_config import setup_logging, get_logger
@@ -22,6 +24,8 @@ app.blueprint(device_routes)
 app.blueprint(rack_routes)
 app.blueprint(export_routes)
 app.blueprint(health_routes)
+app.blueprint(usage_routes)
+app.blueprint(federation_routes)
 app.static('/logo.png', './logo.png', name='logo')
 app.static('/xts_allocator.xts', './xts_allocator.xts', name='xts_config')
 
@@ -38,9 +42,10 @@ async def check_expired_allocations():
             try:
                 now = datetime.utcnow()
                 
-                # Find expired allocations
+                # Find expired allocations (only temporary allocations)
                 expired_devices = session.query(Device).filter(
                     Device.state == DeviceState.ALLOCATED.value,
+                    Device.allocation_type == "temporary",
                     Device.allocation_expiry.isnot(None),
                     Device.allocation_expiry <= now
                 ).all()

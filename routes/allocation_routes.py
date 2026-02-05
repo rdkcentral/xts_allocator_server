@@ -67,6 +67,7 @@ async def allocate_slot(request):
             
             # Set owner and expiry before allocation
             slot.owner_email = user.get("email")
+            slot.allocation_type = "temporary"
             if allocation_expiry:
                 slot.allocation_expiry = allocation_expiry
             
@@ -86,6 +87,7 @@ async def allocate_slot(request):
                 name=user.get("name"),
                 start_time=datetime.utcnow(),
                 duration_requested=duration_minutes,
+                allocation_type="temporary",
                 state_before=state_before,
                 software_version=slot.software_version
             )
@@ -121,6 +123,7 @@ async def allocate_slot(request):
             
             # Set owner and expiry before allocation
             slot.owner_email = user.get("email")
+            slot.allocation_type = "temporary"
             if allocation_expiry:
                 slot.allocation_expiry = allocation_expiry
             
@@ -140,6 +143,7 @@ async def allocate_slot(request):
                 name=user.get("name"),
                 start_time=datetime.utcnow(),
                 duration_requested=duration_minutes,
+                allocation_type="temporary",
                 state_before=state_before,
                 software_version=slot.software_version
             )
@@ -351,6 +355,128 @@ async def get_allocation_history(request):
     except ValueError as e:
         return json({"error": f"Invalid parameter: {str(e)}"}, status=400)
     except Exception as e:
+        return json({"error": str(e)}, status=500)
+    finally:
+        session.close()
+
+@allocation_routes.post("/allocate_permanent")
+async def allocate_permanent(request):
+    """
+    Allocate a device permanently to a user (no expiry).
+    Intended for desk boxes and long-term assignments.
+    """
+    session = SessionLocal()
+    try:
+        data = request.json
+        user = data["user"]
+        slot_params = data["slot"]
+
+        if not slot_params.get("id"):
+            return json({"message": "'id' must be provided for permanent allocation"}, status=400)
+        
+        slot_id = slot_params["id"]
+        slot = session.query(Device).filter(Device.id == slot_id).first()
+        
+        if not slot:
+            return json({"message": f"Slot with id {slot_id} not found"}, status=404)
+        if slot.state != DeviceState.FREE.value:
+            return json({"message": f"Slot {slot_id} is not free (current state: {slot.state})"}, status=409)
+        
+        # Set owner for permanent allocation (no expiry)
+        slot.owner_email = user.get("email")
+        slot.allocation_type = "permanent"
+        slot.allocation_expiry = None
+        
+        # Record state before allocation
+        state_before = slot.state
+        
+        # Allocate the slot using state machine
+        success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
+        if not success:
+            return json({"message": message}, status=400)
+        
+        # Create allocation history record
+        history = AllocationHistory(
+            device_id=slot.id,
+            user=user.get("username"),
+            email=user.get("email"),
+            name=user.get("name"),
+            start_time=datetime.utcnow(),
+            duration_requested=None,  # No duration for permanent
+            allocation_type="permanent",
+            state_before=state_before,
+            software_version=slot.software_version
+        )
+        session.add(history)
+        session.commit()
+        
+        logger.info(f"Permanent allocation: device_id={slot.id}, rack={slot.rack.name}, slot={slot.slot_name}, email={user.get('email')}, history_id={history.id}")
+        
+        response = {
+            "message": "Slot allocated permanently",
+            "slot_id": slot.id,
+            "rackName": slot.rack.name,
+            "rackId": slot.rack_id,
+            "slotName": slot.slot_name,
+            "state": slot.state,
+            "owner_email": slot.owner_email,
+            "allocation_type": "permanent",
+            "allocation_history_id": history.id
+        }
+        return json(response, status=200)
+
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Permanent allocation error: {str(e)}", exc_info=True)
+        return json({"message": "Internal server error", "error": str(e)}, status=500)
+    finally:
+        session.close()
+
+
+@allocation_routes.post("/report_status")
+async def report_status(request):
+    """
+    Allow XTS or external tools to report device status.
+    Updates last_seen, connectivity_status, software_version, and system_metrics.
+    """
+    session = SessionLocal()
+    try:
+        data = request.json
+        device_id = data.get("device_id")
+        
+        if not device_id:
+            return json({"error": "device_id is required"}, status=400)
+        
+        device = session.query(Device).filter(Device.id == device_id).first()
+        if not device:
+            return json({"error": f"Device {device_id} not found"}, status=404)
+        
+        # Update status fields
+        device.last_seen = datetime.utcnow()
+        
+        if "connectivity_status" in data:
+            device.connectivity_status = data["connectivity_status"]
+        
+        if "software_version" in data:
+            device.software_version = data["software_version"]
+        
+        if "system_metrics" in data:
+            device.system_metrics = data["system_metrics"]
+        
+        session.commit()
+        
+        logger.info(f"Status report for device {device_id}: connectivity={device.connectivity_status}, software={device.software_version}")
+        
+        return json({
+            "message": "Status updated successfully",
+            "device_id": device_id,
+            "last_seen": device.last_seen.isoformat() + "Z",
+            "connectivity_status": device.connectivity_status
+        }, status=200)
+    
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Status report error: {str(e)}", exc_info=True)
         return json({"error": str(e)}, status=500)
     finally:
         session.close()

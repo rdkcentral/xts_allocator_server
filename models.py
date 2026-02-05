@@ -72,9 +72,15 @@ class Device(Base):
     
     # Allocation details
     owner_email = Column(String, nullable=True, index=True)
-    allocation_expiry = Column(DateTime, nullable=True)  # When allocation expires
+    allocation_type = Column(String, default="temporary", nullable=False)  # temporary (with expiry) or permanent (no expiry)
+    allocation_expiry = Column(DateTime, nullable=True)  # When allocation expires (null for permanent)
     software_version = Column(String, nullable=True)  # Software version on device
     last_verified = Column(DateTime, nullable=True)  # Last health check/verification
+    
+    # Device status tracking (for live monitoring)
+    last_seen = Column(DateTime, nullable=True)  # Last time device was seen/reported
+    connectivity_status = Column(String, nullable=True)  # online, offline, unreachable
+    system_metrics = Column(JSON, nullable=True)  # CPU, memory, uptime, etc.
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -108,11 +114,36 @@ class AllocationHistory(Base):
     start_time = Column(DateTime, nullable=False, default=datetime.utcnow)
     end_time = Column(DateTime, nullable=True)
     duration_requested = Column(Integer, nullable=True)  # Minutes requested
+    allocation_type = Column(String, default="temporary")  # temporary or permanent
     
     # State tracking
     state_before = Column(String, nullable=True)  # State before allocation
     state_after = Column(String, nullable=True)  # State after deallocation
     software_version = Column(String, nullable=True)  # Software version at allocation time
     
+    # Test execution tracking (usage statistics)
+    test_execution_count = Column(Integer, default=0)  # Number of tests run during this allocation
+    total_test_time = Column(Integer, default=0)  # Total minutes spent in testing state
+    idle_time = Column(Integer, default=0)  # Total minutes idle (allocated but not testing)
+    
     # Relationships
     device = relationship("Device", back_populates="allocations")
+
+class Server(Base):
+    """Server model for federated multi-server architecture.
+    
+    Tracks slave servers that register with the master server.
+    """
+    __tablename__ = "servers"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)  # Server identifier
+    url = Column(String, nullable=False, unique=True)  # Base URL (e.g., http://192.168.1.100:5000)
+    location = Column(String, nullable=True)  # Physical location (office, floor, building)
+    role = Column(String, default="slave", nullable=False)  # master or slave
+    status = Column(String, default="online", nullable=False)  # online, offline, unreachable
+    device_count = Column(Integer, default=0)  # Cached device count
+    last_heartbeat = Column(DateTime, nullable=True)  # Last heartbeat from slave
+    server_metadata = Column(JSON, nullable=True)  # Additional server metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
