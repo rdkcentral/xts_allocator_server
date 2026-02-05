@@ -39,7 +39,7 @@
     - XTS is the unified interface for engineers to run entire E2E test workflow
   - **Server endpoints:**
     - `/export/raft_config` - return allocator-optimized YAML config
-    - `/export/legacy_config` - backward compatible rack_config + device_config
+    - `/export/python_raft_config` - python_raft-compatible rack_config + device_config
     - Config includes allocation_id for reference
   - **New allocator config format** (optimized for XTS allocator integration):
     - Include server communication metadata (allocator_url, allocation_id)
@@ -169,7 +169,7 @@ xts_allocator_server, xts_core, and python_raft
 ### Python RAFT Team
 
 - [ ] Add dual-mode config support in python_raft
-  - Legacy mode: existing rack_config.yml + device_config.yml (manual/static setups)
+  - Standard mode: existing rack_config.yml + device_config.yml (manual/static setups)
   - Allocator mode: config from XTS allocator server (dynamic/allocated devices)
   - Auto-detect mode based on config source or explicit flag
   - Parse device connection details from new config format

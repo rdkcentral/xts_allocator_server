@@ -7,4 +7,6 @@ venv/
 *.pyc
 *.db
 xts_allocator.db
-*.logxts_core/
+*.log
+xts_core/
+
