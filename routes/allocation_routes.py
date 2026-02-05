@@ -2,20 +2,57 @@ from sanic import Blueprint
 from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory, Rack
 from state_machine import DeviceState, can_transition, transition_device, get_valid_transitions, is_valid_state
+from datetime import datetime, timedelta
 
 allocation_routes = Blueprint("allocation_routes")
 
+
+def parse_duration(duration_str):
+    """
+    Parse duration string to minutes.
+    Supports: '30m', '2h', '1.5h', '90m'
+    Returns: minutes as integer, or None if invalid
+    """
+    if not duration_str:
+        return None
+    
+    duration_str = duration_str.strip().lower()
+    try:
+        if duration_str.endswith('m'):
+            return int(duration_str[:-1])
+        elif duration_str.endswith('h'):
+            hours = float(duration_str[:-1])
+            return int(hours * 60)
+        else:
+            # Assume minutes if no unit
+            return int(duration_str)
+    except (ValueError, AttributeError):
+        return None
+
+
 @allocation_routes.post("/allocate_slot")
 async def allocate_slot(request):
-    """Allocate a free slot to a user."""
+    """Allocate a free slot to a user with optional duration."""
     session = SessionLocal()
     try:
         data = request.json
         user = data["user"]
         slot_params = data["slot"]
+        duration_str = data.get("duration")  # e.g., "2h", "30m", "90m"
 
         if not slot_params.get("id") and not slot_params.get("platform"):
             return json({"message": "Either 'id' or 'platform' must be provided"}, status=400)
+        
+        # Parse duration if provided
+        duration_minutes = None
+        allocation_expiry = None
+        if duration_str:
+            duration_minutes = parse_duration(duration_str)
+            if duration_minutes is None:
+                return json({"error": "Invalid duration format. Use '30m', '2h', or '90m'"}, status=400)
+            if duration_minutes <= 0 or duration_minutes > 10080:  # Max 1 week
+                return json({"error": "Duration must be between 1 minute and 1 week (10080m)"}, status=400)
+            allocation_expiry = datetime.utcnow() + timedelta(minutes=duration_minutes)
 
         # Allocate by slot_id if provided
         if "id" in slot_params:
@@ -26,14 +63,17 @@ async def allocate_slot(request):
             if slot.state != DeviceState.FREE.value:
                 return json({"message": f"Slot {slot_id} is not free (current state: {slot.state})"}, status=409)
             
-            # Set owner before allocation
+            # Set owner and expiry before allocation
             slot.owner_email = user.get("email")
+            if allocation_expiry:
+                slot.allocation_expiry = allocation_expiry
             
             # Allocate the slot using state machine
             success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
             if not success:
                 return json({"message": message}, status=400)
-            return json({
+            
+            response = {
                 "message": "Slot allocated successfully",
                 "slot_id": slot.id,
                 "rackName": slot.rack.name,
@@ -41,7 +81,11 @@ async def allocate_slot(request):
                 "slotName": slot.slot_name,
                 "state": slot.state,
                 "owner_email": slot.owner_email
-            }, status=200)
+            }
+            if allocation_expiry:
+                response["allocation_expiry"] = allocation_expiry.isoformat()
+                response["duration_minutes"] = duration_minutes
+            return json(response, status=200)
 
         # Allocate by platform/tags
         else:
@@ -53,14 +97,17 @@ async def allocate_slot(request):
             if not slot:
                 return json({"message": "No free slot matches the criteria", "slots":[]}, status=200)
             
-            # Set owner before allocation
+            # Set owner and expiry before allocation
             slot.owner_email = user.get("email")
+            if allocation_expiry:
+                slot.allocation_expiry = allocation_expiry
             
             # Allocate the slot using state machine
             success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
             if not success:
                 return json({"message": message}, status=400)
-            return json({
+            
+            response = {
                 "message": "Slot allocated successfully",
                 "slot_id": slot.id,
                 "rackName": slot.rack.name,
@@ -68,7 +115,11 @@ async def allocate_slot(request):
                 "slotName": slot.slot_name,
                 "state": slot.state,
                 "owner_email": slot.owner_email
-            }, status=200)
+            }
+            if allocation_expiry:
+                response["allocation_expiry"] = allocation_expiry.isoformat()
+                response["duration_minutes"] = duration_minutes
+            return json(response, status=200)
 
     except Exception as e:
         session.rollback()

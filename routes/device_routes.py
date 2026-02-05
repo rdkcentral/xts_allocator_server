@@ -24,6 +24,7 @@ async def list_slots(request):
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
                 "owner_email": slot.owner_email,
+                "allocation_expiry": slot.allocation_expiry.isoformat() if slot.allocation_expiry else None,
                 "make": slot.make,
                 "model": slot.model,
                 "external_equipment": slot.external_equipment or [],
@@ -61,7 +62,8 @@ async def list_slots_filters(request):
                 "description": slot.description,
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
-                "owner_email": slot.owner_email
+                "owner_email": slot.owner_email,
+                "allocation_expiry": slot.allocation_expiry.isoformat() if slot.allocation_expiry else None
             }
             for slot in query.all()
         ]

@@ -13,23 +13,69 @@
   - Add state transition validation ✓
   - Track state_changed_at timestamp ✓
 
-- [ ] **Implement duration-based allocation with expiry**
-  - Add duration to allocation request (minutes/hours), calculate expiry
-  - Create Sanic background task to check expired allocations every N minutes
-  - Auto-deallocate and trigger state change to 'resetting'
+- [x] **Implement duration-based allocation with expiry**
+  - Add duration to allocation request (minutes/hours), calculate expiry ✓
+  - Create Sanic background task to check expired allocations every N minutes ✓
+  - Auto-deallocate and trigger state change to 'resetting' ✓
+
+- [ ] **Build Flutter web monitoring dashboard**
+  - Web interface for device allocation and management
+  - Features: allocate/deallocate devices, view device status, manage system
+  - Real-time device state visualization
+  - User-friendly interface for non-CLI users
+  - Consider: device grid view, search/filter, allocation history view
+
+- [ ] **Design and implement allocator-driven configuration for python_raft**
+  - **Integration architecture**: XTS orchestrates allocator server + python_raft
+    - XTS calls allocator server → receives config → saves locally → invokes raft → raft reports back
+    - XTS is the unified interface for engineers to run entire E2E test workflow
+  - **New allocator config format** (optimized for XTS allocator integration):
+    - Include server communication metadata (allocator_url, allocation_id, server_callbacks)
+    - Unified config structure combining device + rack info in single file
+    - Support dynamic/allocated devices vs static rack definitions
+    - Include test lifecycle hooks (start_test, heartbeat, end_test endpoints)
+    - Store allocation context (duration, expiry, owner_email) for raft's use
+  - **Dual mode support in python_raft** (coordinate with raft team):
+    - Legacy mode: existing rack_config.yml + device_config.yml (manual/static setups)
+    - Allocator mode: config from XTS allocator server (dynamic/allocated devices)
+    - Auto-detect mode based on config source or explicit flag
+    - In allocator mode: raft reports status back to server automatically
+  - **Server endpoints:**
+    - `/export/raft_config` - return allocator-optimized YAML config
+    - `/export/legacy_config` - backward compatible rack_config + device_config
+    - Config includes allocation_id so raft can reference it in status updates
+  - **Config storage and usage:**
+    - XTS saves config locally when received from allocator
+    - XTS passes config path to raft when invoking tests
+    - Raft loads config and extracts server communication details
+    - Raft uses config for device connection + server status reporting
+  - **Benefits of new format:**
+    - Not constrained by legacy schema limitations
+    - Built-in server communication support
+    - Optimized for allocation workflow (XTS → allocator → raft)
+    - Can evolve independently while maintaining backward compatibility
+    - Simplifies E2E testing: engineers use XTS commands, everything else is automated
 
 - [ ] **Implement AllocationHistory audit trail**
   - Populate AllocationHistory on allocate/deallocate
   - Track: user_email, device_id, start_time, end_time, duration_requested, software_version, state_before/after
   - Add `GET /allocation_history` endpoint with filters
 
-- [ ] **Build CLI tool for MVP operations**
-  - `xts allocate --platform X --duration 2h`
-  - `xts deallocate --id N`
-  - `xts list --rack R --state free`
-  - `xts racks`
-  - `xts device add`
-  - `xts device info --id N`
+- [ ] **Create .xts command definition file and serve it**
+  - Build `xts_allocator.xts` file with YAML command definitions for XTS tool integration
+  - Add server endpoint to serve the .xts file (e.g., `/xts_allocator.xts`)
+  - Users can run: `xts alias http://<server>/xts_allocator.xts` to access commands remotely
+  - **XTS orchestration commands** (E2E testing workflow):
+    - `xts allocate` - allocate device, receive config, save locally for raft
+    - `xts test run` - allocate device + run raft tests automatically (one command)
+    - `xts test list` - list available test suites/devices
+    - `xts deallocate` - cleanup after tests complete
+    - `xts status` - check allocation status, test progress
+  - Commands use curl to interact with REST API endpoints
+  - XTS saves allocator config locally → passes to python_raft → raft reports back to server
+  - Include passthrough params for dynamic arguments (email, duration, filters, test suite)
+  - Allows central management and evolution of commands over time
+  - **Goal**: Single unified tool (XTS) for engineers to control entire test lifecycle
 
 - [ ] **Add structured logging framework**
   - Python logging module with INFO/ERROR levels
@@ -47,3 +93,58 @@
   - Rack listings, equipment search, state transitions
   - CRUD operations, concurrent allocation attempts
   - Invalid inputs, edge cases
+
+- [ ] **Implement XTS test execution tracking and lifecycle management**
+  - Add device state: "testing" (distinct from "allocated" - indicates active test execution)
+  - Endpoint: `/start_test` - XTS reports test start with expected_duration, test_name, test_suite
+  - Endpoint: `/test_heartbeat` - XTS sends periodic heartbeat during test execution
+  - Endpoint: `/end_test` - XTS reports test completion with status (success/failure/error), exit_code, logs_url
+  - Allocation validation: XTS checks allocation still valid before starting tests
+  - Server metadata in allocation response: include server_url so XTS knows which server to report back to
+  - **Flexible expiry during testing**:
+    - Pause/disable expiry timer when device enters "testing" state
+    - OR auto-extend allocation based on test's expected_duration
+    - Never interrupt active test execution due to allocation expiry
+    - Resume normal expiry after test completes and device returns to "allocated"
+  - **Timeslot management strategy**:
+    - Use test's `expected_duration` to calculate test_expiry (separate from allocation_expiry)
+    - Set maximum test duration cap (e.g., 4 hours) as safety net for hung tests
+    - Heartbeat timeout: if no heartbeat for N minutes during "testing", assume failure and reset
+    - Allocation_expiry behavior: freeze during testing, resume countdown after test ends
+    - Optional: Add "soft warning" period - notify user X minutes before hard limit
+    - Optional: Queue system - allow reservation of future timeslots for predictable scheduling
+    - Track "idle time" vs "test time" separately in allocation history for metrics
+  - Failure handling: if heartbeat stops, transition to "resetting" after timeout
+  - Store test execution metadata: link test runs to allocation history
+
+- [ ] **Support permanent allocations and device status tracking**
+  - Add allocation_type field: "temporary" (with expiry) vs "permanent" (no expiry)
+  - Endpoint: `/allocate_permanent` - assign device to user indefinitely (requires admin/special permission)
+  - Permanent allocations: no expiry, owner retains device until explicit deallocation
+  - **Use case: Engineer desk boxes** - permanently allocated devices on engineer desks for manual testing/development
+  - **Bidirectional device status tracking:**
+    - XTS reporting (when running): `/report_status` endpoint - XTS reports status during test execution
+    - Server-side polling (for permanent allocations): background task to check device health directly
+      - Critical for desk boxes where engineers may use device manually without XTS
+      - Use control_uris from device model to reach device (SSH, HTTP, SNMP, etc.)
+      - Check reachability (ping/connection test), fetch software version, system metrics
+      - Update device status automatically without requiring XTS
+      - Useful for permanently allocated boxes even when XTS isn't actively running
+    - Track last_seen timestamp, connectivity status, software version, system metrics
+    - Store device uptime, reboot history, error conditions
+  - Usage statistics for permanent allocations:
+    - Track test execution count (when XTS is used), total test time, idle time percentage
+    - Test suite breakdown: which tests ran, frequency, success rates
+    - Generate usage reports: daily/weekly/monthly activity summaries
+    - API endpoint: `/device/{id}/usage_stats` - retrieve historical usage data
+  - Benefit: maintain visibility and metrics for all devices (desk boxes, shared pool, etc.)
+  - Note: Server allocation is ideal but not mandatory - devices can exist without allocation
+
+- [ ] **Implement federated multi-server architecture**
+  - Support multiple XTS allocator servers (per office/floor/group/cluster)
+  - Master server registry: tracks all slave servers globally (URL, location, status, device count)
+  - Slave server registration: POST to master on startup with server metadata
+  - Health monitoring: periodic heartbeat from slaves, mark servers offline/online
+  - Cross-server device discovery: master aggregates device listings from all active slaves
+  - Resilience: slaves operate independently, master handles offline/unreachable servers gracefully
+  - API endpoints: `/servers` (list all), `/servers/{id}/devices` (proxy to slave), `/register` (slave registration)
