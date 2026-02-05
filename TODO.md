@@ -129,28 +129,24 @@
 
 **Goal: Deep integration with XTS and python_raft**
 
-- [ ] **Implement XTS test execution tracking and lifecycle management (server callbacks)**
-  - Add device state: "testing" (distinct from "allocated" - indicates active test execution)
-  - Endpoint: `/start_test` - XTS/raft reports test start with expected_duration, test_name, test_suite
-  - Endpoint: `/test_heartbeat` - periodic heartbeat during test execution
-  - Endpoint: `/end_test` - reports test completion with status (success/failure/error), exit_code, logs_url
-  - Allocation validation: check allocation still valid before starting tests
-  - Server metadata in allocation response: include server_url for callbacks
-  - **Flexible expiry during testing**:
-    - Pause/disable expiry timer when device enters "testing" state
-    - OR auto-extend allocation based on test's expected_duration
-    - Never interrupt active test execution due to allocation expiry
-    - Resume normal expiry after test completes and device returns to "allocated"
-  - **Timeslot management strategy**:
-    - Use test's `expected_duration` to calculate test_expiry (separate from allocation_expiry)
-    - Set maximum test duration cap (e.g., 4 hours) as safety net for hung tests
-    - Heartbeat timeout: if no heartbeat for N minutes during "testing", assume failure and reset
-    - Allocation_expiry behavior: freeze during testing, resume countdown after test ends
-    - Optional: Add "soft warning" period - notify user X minutes before hard limit
-    - Optional: Queue system - allow reservation of future timeslots for predictable scheduling
-    - Track "idle time" vs "test time" separately in allocation history for metrics
-  - Store test execution metadata: link test runs to allocation history
-  - **Coordinate with xts_core and python_raft**: Add callback support for status reporting
+- [x] **Implement XTS test execution tracking and lifecycle management (server callbacks)**
+  - Add device state: "testing" (distinct from "allocated") ✓
+  - Endpoint: `/start_test` - XTS/raft reports test start with test metadata ✓
+  - Endpoint: `/test_heartbeat` - periodic heartbeat during test execution ✓
+  - Endpoint: `/end_test` - reports test completion with status, exit_code, logs_url ✓
+  - Endpoint: `/test_executions` - query test runs with filtering ✓
+  - Allocation validation: check allocation still valid before starting tests ✓
+  - **Flexible expiry during testing**: ✓
+    - Skip devices in testing state from allocation expiry ✓
+    - Auto-extend allocation based on test's expected_duration ✓
+    - Never interrupt active test execution due to allocation expiry ✓
+  - **Timeslot management strategy**: ✓
+    - Use test's expected_duration to auto-extend allocations ✓
+    - Set maximum test duration cap (4 hours default, configurable) ✓
+    - Heartbeat timeout: detect hung tests (10 min default, configurable) ✓
+    - Track test time vs idle time separately in allocation history ✓
+  - Store test execution metadata: link test runs to allocation history ✓
+  - Background task: Detect and terminate hung/timeout tests ✓
 
 ---
 
