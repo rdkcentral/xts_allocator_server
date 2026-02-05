@@ -11,6 +11,7 @@ class DeviceState(Enum):
     """Valid device states."""
     FREE = "free"
     ALLOCATED = "allocated"
+    TESTING = "testing"  # Active test execution in progress
     BUSY = "busy"
     RESETTING = "resetting"
     MAINTENANCE = "maintenance"
@@ -26,9 +27,15 @@ STATE_TRANSITIONS = {
     ],
     DeviceState.ALLOCATED: [
         DeviceState.FREE,
+        DeviceState.TESTING,  # Start test execution
         DeviceState.BUSY,
         DeviceState.RESETTING,
         DeviceState.MAINTENANCE,
+        DeviceState.OFFLINE
+    ],
+    DeviceState.TESTING: [
+        DeviceState.ALLOCATED,  # Test completed normally
+        DeviceState.RESETTING,  # Test failed/hung, need reset
         DeviceState.OFFLINE
     ],
     DeviceState.BUSY: [

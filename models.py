@@ -146,4 +146,41 @@ class Server(Base):
     last_heartbeat = Column(DateTime, nullable=True)  # Last heartbeat from slave
     server_metadata = Column(JSON, nullable=True)  # Additional server metadata
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TestExecution(Base):
+    """Test execution tracking for active test runs.
+    
+    Tracks test lifecycle from start to completion with heartbeat monitoring.
+    Links to allocation history for complete audit trail.
+    """
+    __tablename__ = "test_executions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
+    allocation_history_id = Column(Integer, ForeignKey("allocation_history.id"), nullable=True, index=True)
+    
+    # Test information
+    test_name = Column(String, nullable=False)
+    test_suite = Column(String, nullable=True)
+    expected_duration = Column(Integer, nullable=True)  # Expected duration in minutes
+    max_duration = Column(Integer, default=240)  # Maximum allowed duration (4 hours default)
+    
+    # Test lifecycle
+    start_time = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    end_time = Column(DateTime, nullable=True)
+    last_heartbeat = Column(DateTime, nullable=True)
+    heartbeat_timeout = Column(Integer, default=10)  # Minutes without heartbeat before considering hung
+    
+    # Test results
+    status = Column(String, nullable=True)  # success, failure, error, timeout, hung
+    exit_code = Column(Integer, nullable=True)
+    logs_url = Column(String, nullable=True)
+    error_message = Column(String, nullable=True)
+    
+    # Metadata
+    test_metadata = Column(JSON, nullable=True)  # Additional test-specific data
+    
+    # Relationships
+    device = relationship("Device")
+    allocation_history = relationship("AllocationHistory")

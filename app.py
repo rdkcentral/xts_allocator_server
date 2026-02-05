@@ -6,10 +6,11 @@ from routes.export_routes import export_routes
 from routes.health_routes import health_routes
 from routes.usage_routes import usage_routes
 from routes.federation_routes import federation_routes
-from models import SessionLocal, Device
+from routes.test_routes import test_routes
+from models import SessionLocal, Device, TestExecution
 from state_machine import DeviceState, transition_device
 from logging_config import setup_logging, get_logger
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import asyncio
 
@@ -26,12 +27,13 @@ app.blueprint(export_routes)
 app.blueprint(health_routes)
 app.blueprint(usage_routes)
 app.blueprint(federation_routes)
+app.blueprint(test_routes)
 app.static('/logo.png', './logo.png', name='logo')
 app.static('/xts_allocator.xts', './xts_allocator.xts', name='xts_config')
 
 
 async def check_expired_allocations():
-    """Background task to check and reset expired allocations."""
+    """Background task to check expired allocations and hung tests."""
     logger = get_logger()
     
     while True:
@@ -42,7 +44,7 @@ async def check_expired_allocations():
             try:
                 now = datetime.utcnow()
                 
-                # Find expired allocations (only temporary allocations)
+                # 1. Check for expired allocations (skip devices in testing state)
                 expired_devices = session.query(Device).filter(
                     Device.state == DeviceState.ALLOCATED.value,
                     Device.allocation_type == "temporary",
@@ -63,8 +65,49 @@ async def check_expired_allocations():
                     else:
                         logger.error(f"Failed to transition device {device.id}: {message}")
                 
+                # 2. Check for hung tests (no heartbeat or exceeded max duration)
+                active_tests = session.query(TestExecution).filter(
+                    TestExecution.end_time.is_(None)
+                ).all()
+                
+                for test in active_tests:
+                    test_duration = (now - test.start_time).total_seconds() / 60
+                    
+                    # Check max duration exceeded
+                    if test_duration > test.max_duration:
+                        logger.warning(f"Test {test.id} exceeded max duration ({test.max_duration}min), marking as timeout")
+                        test.end_time = now
+                        test.status = "timeout"
+                        test.error_message = f"Test exceeded maximum duration of {test.max_duration} minutes"
+                        
+                        # Transition device back to allocated or resetting
+                        device = session.query(Device).filter(Device.id == test.device_id).first()
+                        if device and device.state == DeviceState.TESTING.value:
+                            success, message = transition_device(device, DeviceState.RESETTING.value, session)
+                            if success:
+                                logger.info(f"Device {device.id} transitioned to resetting after test timeout")
+                        continue
+                    
+                    # Check heartbeat timeout
+                    if test.last_heartbeat:
+                        minutes_since_heartbeat = (now - test.last_heartbeat).total_seconds() / 60
+                        if minutes_since_heartbeat > test.heartbeat_timeout:
+                            logger.warning(f"Test {test.id} has not sent heartbeat for {minutes_since_heartbeat:.1f}min, marking as hung")
+                            test.end_time = now
+                            test.status = "hung"
+                            test.error_message = f"No heartbeat received for {minutes_since_heartbeat:.1f} minutes (timeout: {test.heartbeat_timeout}min)"
+                            
+                            # Transition device to resetting
+                            device = session.query(Device).filter(Device.id == test.device_id).first()
+                            if device and device.state == DeviceState.TESTING.value:
+                                success, message = transition_device(device, DeviceState.RESETTING.value, session)
+                                if success:
+                                    logger.info(f"Device {device.id} transitioned to resetting after hung test")
+                
+                session.commit()
+                
             except Exception as e:
-                logger.error(f"Error in expiry check: {e}")
+                logger.error(f"Error in expiry/hung test check: {e}", exc_info=True)
                 session.rollback()
             finally:
                 session.close()
