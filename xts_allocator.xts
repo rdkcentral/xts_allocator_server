@@ -21,13 +21,33 @@
 #****************************************************************************
 
 # XTS Allocator Commands
-# Set XTS_ALLOCATOR_SERVER environment variable to point to your allocator server
-# Default: http://localhost:5000
+# 
+# Quick Start:
+#   1. Register server: xts alias add allocator http://server:5000/xts_allocator.xts
+#   2. List devices:    xts allocator list devices
+#   3. Allocate:        xts allocator allocate by_id you@example.com 5 2h
+#   4. Deallocate:      xts allocator deallocate you@example.com 5
+#
+# Environment Variables:
+#   XTS_ALLOCATOR_SERVER - Override server URL (default: http://localhost:5000)
+#
+# Duration Format:
+#   30m  = 30 minutes
+#   2h   = 2 hours
+#   90   = 90 minutes (plain number)
 
 allocate:
   description: "Allocate a device from the XTS allocator server"
   by_id:
-    description: "Allocate device by ID"
+    description: |
+      Allocate device by specific ID
+      
+      Usage: xts allocator allocate by_id <email> <device_id> <duration>
+      
+      Examples:
+        xts allocator allocate by_id user@example.com 5 2h
+        xts allocator allocate by_id test@dev.com 1 30m
+        xts allocator allocate by_id admin@test.com 10 90
     command: |
       curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
         -H "Content-Type: application/json" \
@@ -35,7 +55,14 @@ allocate:
     params:
       passthrough: true
   by_platform:
-    description: "Allocate device by platform"
+    description: |
+      Allocate first available device matching platform
+      
+      Usage: xts allocator allocate by_platform <email> <platform> <duration>
+      
+      Examples:
+        xts allocator allocate by_platform user@example.com alpha.uk 2h
+        xts allocator allocate by_platform test@dev.com beta.us 1h
     command: |
       curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
         -H "Content-Type: application/json" \
@@ -43,7 +70,14 @@ allocate:
     params:
       passthrough: true
   by_tags:
-    description: "Allocate device by tags (comma-separated)"
+    description: |
+      Allocate first available device matching tags
+      
+      Usage: xts allocator allocate by_tags <email> <tags> <duration>
+      
+      Examples:
+        xts allocator allocate by_tags user@example.com hdmi,4k 2h
+        xts allocator allocate by_tags test@dev.com production 1h
     command: |
       curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
         -H "Content-Type: application/json" \
@@ -52,7 +86,14 @@ allocate:
       passthrough: true
 
 deallocate:
-  description: "Deallocate a device"
+  description: |
+    Release an allocated device
+    
+    Usage: xts allocator deallocate <email> <device_id>
+    
+    Examples:
+      xts allocator deallocate user@example.com 5
+      xts allocator deallocate test@dev.com 1
   command: |
     curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/deallocate_slot \
       -H "Content-Type: application/json" \
@@ -63,25 +104,52 @@ deallocate:
 list:
   description: "List devices and racks"
   devices:
-    description: "List all devices"
+    description: |
+      List all devices with their current status
+      
+      Usage: xts allocator list devices
+      
+      Shows: ID, platform, state, owner, rack location
     command: curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots
   racks:
-    description: "List all racks"
+    description: |
+      List all racks with device counts
+      
+      Usage: xts allocator list racks
+      
+      Shows: Rack names and number of devices in each
     command: curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_racks
   free:
-    description: "List free devices"
+    description: |
+      List only available (free) devices
+      
+      Usage: xts allocator list free
+      
+      Example: xts allocator list free
     command: |
       curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
         -H "Content-Type: application/json" \
         -d '{"state": "free"}'
   allocated:
-    description: "List allocated devices"
+    description: |
+      List currently allocated devices
+      
+      Usage: xts allocator list allocated
+      
+      Shows: Who has allocated which devices and when they expire
     command: |
       curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
         -H "Content-Type: application/json" \
         -d '{"state": "allocated"}'
   by_platform:
-    description: "List devices by platform"
+    description: |
+      List devices filtered by platform
+      
+      Usage: xts allocator list by_platform <platform>
+      
+      Examples:
+        xts allocator list by_platform alpha.uk
+        xts allocator list by_platform beta.us
     command: |
       curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
         -H "Content-Type: application/json" \
@@ -90,28 +158,54 @@ list:
       passthrough: true
 
 search:
-  description: "Search for devices"
+  description: "Search for devices with specific criteria"
   by_rack:
-    description: "Search devices by rack name"
+    description: |
+      Find devices in a specific rack
+      
+      Usage: xts allocator search by_rack <rack_name>
+      
+      Examples:
+        xts allocator search by_rack rack-a
+        xts allocator search by_rack test-rack-1
     command: |
       curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search?rack=$1
     params:
       passthrough: true
   by_platform:
-    description: "Search devices by platform"
+    description: |
+      Find devices by platform type
+      
+      Usage: xts allocator search by_platform <platform>
+      
+      Examples:
+        xts allocator search by_platform alpha.uk
+        xts allocator search by_platform beta.us
     command: |
       curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search?platform=$1
     params:
       passthrough: true
   by_tags:
-    description: "Search devices by tags (comma-separated)"
+    description: |
+      Find devices matching tags
+      
+      Usage: xts allocator search by_tags <tags>
+      
+      Examples:
+        xts allocator search by_tags hdmi
+        xts allocator search by_tags 4k,production
     command: |
       curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search?tags=$1
     params:
       passthrough: true
 
 status:
-  description: "Check server status"
+  description: |
+    Check if allocator server is responding
+    
+    Usage: xts allocator status
+    
+    Returns: Server availability and basic info
   command: |
     echo "Checking XTS Allocator Server..."
     curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_racks | head -c 100
