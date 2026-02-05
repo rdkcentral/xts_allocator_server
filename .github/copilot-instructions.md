@@ -95,6 +95,47 @@ finally:
 - Single-page HTML served at `/` from `templates/index.html`
 - Static logo served via `app.static()` route
 
+## Git Commit Message Standards
+
+Follow the 50/72 rule for all commit messages as defined in [RDK Central Standards](https://rdkcentral.github.io/rdk-halif-aidl/0.13.0/whitepapers/standardizing_git_commit_messages/):
+
+**Subject Line (≤50 characters):**
+- Use imperative mood: "Add", "Fix", "Update", "Remove", "Refactor"
+- No period at the end
+- Capitalize first word
+- Be concise and descriptive
+
+**Body (≤72 characters per line):**
+- Separate from subject with blank line
+- Explain WHAT and WHY, not HOW
+- Wrap text at 72 characters
+- Use bullet points for multiple changes
+
+**Example:**
+```
+Add duration-based allocation with expiry
+
+Implement automatic deallocation after specified time period.
+Background task checks every 60 seconds for expired allocations
+and transitions devices to 'resetting' state.
+
+- Add parse_duration() supporting 'm', 'h' formats
+- Create asyncio background task for expiry checking
+- Update allocation endpoints to accept duration parameter
+```
+
+**Common Verbs:**
+- Add: New feature or file
+- Fix: Bug fix
+- Update: Modify existing functionality
+- Remove: Delete code or files
+- Refactor: Code restructure without behavior change
+- Improve: Enhancement to existing feature
+- Test: Add or update tests
+- Clean: Code cleanup or formatting
+- Merge: Merge branches
+- Docs: Documentation only changes
+
 ## Common Pitfalls
 - `AllocationHistory` model exists but no routes populate it - history tracking incomplete
 - Tags filtering uses `.contains()` which does substring matching (not exact tag match)
