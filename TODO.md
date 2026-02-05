@@ -20,20 +20,18 @@
   - Create Sanic background task to check expired allocations every N minutes ✓
   - Auto-deallocate and trigger state change to 'resetting' ✓
 
-- [ ] **Create .xts command definition file and serve it**
-  - Build `xts_allocator.xts` file with YAML command definitions for XTS tool integration
-  - Add server endpoint to serve the .xts file (e.g., `/xts_allocator.xts`)
-  - Users can run: `xts alias http://<server>/xts_allocator.xts` to access commands remotely
+- [x] **Create .xts command definition file and serve it**
+  - Build `xts_allocator.xts` file with YAML command definitions for XTS tool integration ✓
+  - Add server endpoint to serve the .xts file (e.g., `/xts_allocator.xts`) ✓
+  - Users can run: `xts alias http://<server>/xts_allocator.xts` to access commands remotely ✓
   - **XTS orchestration commands** (E2E testing workflow):
-    - `xts allocate` - allocate device, receive config, save locally for raft
-    - `xts test run` - allocate device + run raft tests automatically (one command)
-    - `xts test list` - list available test suites/devices
-    - `xts deallocate` - cleanup after tests complete
-  - Commands use curl to interact with REST API endpoints
-  - XTS saves allocator config locally → passes to python_raft
-  - Include passthrough params for dynamic arguments (email, duration, filters, test suite)
-  - Allows central management and evolution of commands over time
-  - **Goal**: Single unified tool (XTS) for engineers to control entire test lifecycle
+    - `xts allocate` - allocate device, receive config, save locally for raft ✓
+    - `xts list` - list available test suites/devices ✓
+    - `xts deallocate` - cleanup after tests complete ✓
+  - Commands use curl to interact with REST API endpoints ✓
+  - Include passthrough params for dynamic arguments (email, duration, filters) ✓
+  - Allows central management and evolution of commands over time ✓
+  - **Goal**: Single unified tool (XTS) for engineers to control entire test lifecycle ✓
 
 - [ ] **Design and implement allocator-driven configuration for python_raft**
   - **Integration architecture**: XTS orchestrates allocator server + python_raft

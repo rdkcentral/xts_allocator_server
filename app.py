@@ -14,7 +14,8 @@ app = Sanic("XTS_Allocator_Server")
 app.blueprint(allocation_routes)
 app.blueprint(device_routes)
 app.blueprint(rack_routes)
-app.static('/logo.png', './logo.png')
+app.static('/logo.png', './logo.png', name='logo')
+app.static('/xts_allocator.xts', './xts_allocator.xts', name='xts_config')
 
 
 async def check_expired_allocations():
