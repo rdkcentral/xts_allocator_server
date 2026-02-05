@@ -2,9 +2,11 @@ from sanic import Blueprint
 from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory, Rack
 from state_machine import DeviceState, can_transition, transition_device, get_valid_transitions, is_valid_state
+from logging_config import get_logger
 from datetime import datetime, timedelta
 
 allocation_routes = Blueprint("allocation_routes")
+logger = get_logger()
 
 
 def parse_duration(duration_str):
@@ -90,6 +92,8 @@ async def allocate_slot(request):
             session.add(history)
             session.commit()
             
+            logger.info(f"Slot allocated by ID: device_id={slot.id}, rack={slot.rack.name}, slot={slot.slot_name}, email={user.get('email')}, duration={duration_minutes}m, history_id={history.id}")
+            
             response = {
                 "message": "Slot allocated successfully",
                 "slot_id": slot.id,
@@ -142,6 +146,8 @@ async def allocate_slot(request):
             session.add(history)
             session.commit()
             
+            logger.info(f"Slot allocated by platform: device_id={slot.id}, rack={slot.rack.name}, slot={slot.slot_name}, platform={slot.platform}, email={user.get('email')}, duration={duration_minutes}m, history_id={history.id}")
+            
             response = {
                 "message": "Slot allocated successfully",
                 "slot_id": slot.id,
@@ -159,6 +165,7 @@ async def allocate_slot(request):
 
     except Exception as e:
         session.rollback()
+        logger.error(f"Allocation error: {str(e)}", exc_info=True)
         return json({"message": "Internal server error", "error": str(e)}, status=500)
     finally:
         session.close()
@@ -201,11 +208,15 @@ async def deallocate_slot(request):
             active_history.end_time = datetime.utcnow()
             active_history.state_after = state_after
             session.commit()
+            logger.info(f"Slot deallocated: device_id={slot_id}, email={user['email']}, history_id={active_history.id}, duration_actual={(active_history.end_time - active_history.start_time).total_seconds() / 60:.1f}m")
+        else:
+            logger.warning(f"Slot deallocated but no active history found: device_id={slot_id}, email={user['email']}")
         
         return json({"message": f"Slot {slot_id} is now free"}, status=200)
     
     except Exception as e:
         session.rollback()
+        logger.error(f"Deallocation error: {str(e)}", exc_info=True)
         return json({"message": "Internal server error", "error": str(e)}, status=500)
     finally:
         session.close()

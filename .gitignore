@@ -10,3 +10,4 @@ xts_allocator.db
 *.log
 xts_core/
 
+logs/

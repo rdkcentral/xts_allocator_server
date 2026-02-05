@@ -5,9 +5,13 @@ from routes.rack_routes import rack_routes
 from routes.export_routes import export_routes
 from models import SessionLocal, Device
 from state_machine import DeviceState, transition_device
+from logging_config import setup_logging, get_logger
 from datetime import datetime
 import os
 import asyncio
+
+# Setup logging
+logger = setup_logging()
 
 app = Sanic("XTS_Allocator_Server")
 
@@ -22,8 +26,7 @@ app.static('/xts_allocator.xts', './xts_allocator.xts', name='xts_config')
 
 async def check_expired_allocations():
     """Background task to check and reset expired allocations."""
-    import logging
-    logger = logging.getLogger("sanic.root")
+    logger = get_logger()
     
     while True:
         try:

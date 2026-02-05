@@ -66,10 +66,10 @@
   - Track: user_email, device_id, start_time, end_time, duration_requested, software_version, state_before/after ✓
   - Add `GET /allocation_history` endpoint with filters ✓
 
-- [ ] **Add structured logging framework**
-  - Python logging module with INFO/ERROR levels
-  - Log: allocation/deallocation, state transitions, errors, API requests
-  - File handler with rotation (RotatingFileHandler), console handler for dev
+- [x] **Add structured logging framework**
+  - Python logging module with INFO/ERROR levels ✓
+  - Log: allocation/deallocation, state transitions, errors, API requests ✓
+  - File handler with rotation (RotatingFileHandler), console handler for dev ✓
 
 - [ ] **Create health check and metrics endpoints**
   - `/health` - status, database connectivity, timestamp
