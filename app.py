@@ -97,6 +97,12 @@ async def stop_expiry_task(app, loop):
 async def main_page(request):
     return await response.file(os.path.join("templates", "index.html"))
 
+
+# Serve the dashboard
+@app.route("/dashboard")
+async def dashboard_page(request):
+    return await response.file(os.path.join("templates", "dashboard.html"))
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0",
             port=5000,

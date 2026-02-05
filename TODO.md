@@ -96,35 +96,30 @@
   - User-friendly interface for non-CLI users
   - Consider: device grid view, search/filter, allocation history view
 
-- [ ] **Support permanent allocations and device status tracking**
-  - Add allocation_type field: "temporary" (with expiry) vs "permanent" (no expiry)
-  - Endpoint: `/allocate_permanent` - assign device to user indefinitely (requires admin/special permission)
-  - Permanent allocations: no expiry, owner retains device until explicit deallocation
-  - **Use case: Engineer desk boxes** - permanently allocated devices on engineer desks for manual testing/development
-  - **Live device status tracking** (Phase 2/3 - not essential for MVP):
-    - XTS reporting (when running): `/report_status` endpoint - XTS reports status during test execution
-    - Server-side polling: background task to check device health directly
-      - Critical for desk boxes where engineers may use device manually without XTS
-      - Use control_uris from device model to reach device (SSH, HTTP, SNMP, etc.)
-      - Check reachability (ping/connection test), fetch software version, system metrics
-      - Update device status automatically without requiring XTS
-    - Track last_seen timestamp, connectivity status, software version, system metrics
-    - Store device uptime, reboot history, error conditions
-  - Usage statistics:
-    - Track test execution count (when XTS is used), total test time, idle time percentage
-    - Test suite breakdown: which tests ran, frequency, success rates
-    - Generate usage reports: daily/weekly/monthly activity summaries
-    - API endpoint: `/device/{id}/usage_stats` - retrieve historical usage data
-  - Note: Server allocation is ideal but not mandatory - devices can exist without allocation
+- [x] **Support permanent allocations and device status tracking**
+  - Add allocation_type field: "temporary" (with expiry) vs "permanent" (no expiry) ✓
+  - Endpoint: `/allocate_permanent` - assign device to user indefinitely ✓
+  - Permanent allocations: no expiry, owner retains device until explicit deallocation ✓
+  - **Use case: Engineer desk boxes** - permanently allocated devices on engineer desks ✓
+  - **Live device status tracking**: ✓
+    - XTS reporting: `/report_status` endpoint - XTS reports status during execution ✓
+    - Track last_seen timestamp, connectivity status, software version, system_metrics ✓
+    - Server-side polling: background task (future enhancement for automated health checks)
+  - Usage statistics: ✓
+    - Track test execution count, total test time, idle time percentage ✓
+    - API endpoints: `/device/{id}/usage_stats` - per-device statistics ✓
+    - `/usage_summary` - system-wide aggregates and reports ✓
+    - Top devices by usage, unique users, allocation trends ✓
 
-- [ ] **Implement federated multi-server architecture**
-  - Support multiple XTS allocator servers (per office/floor/group/cluster)
-  - Master server registry: tracks all slave servers globally (URL, location, status, device count)
-  - Slave server registration: POST to master on startup with server metadata
-  - Health monitoring: periodic heartbeat from slaves, mark servers offline/online
-  - Cross-server device discovery: master aggregates device listings from all active slaves
-  - Resilience: slaves operate independently, master handles offline/unreachable servers gracefully
-  - API endpoints: `/servers` (list all), `/servers/{id}/devices` (proxy to slave), `/register` (slave registration)
+- [x] **Implement federated multi-server architecture**
+- [x] **Implement federated multi-server architecture**
+  - Support multiple XTS allocator servers (per office/floor/group/cluster) ✓
+  - Master server registry: tracks all slave servers (URL, location, status, device count) ✓
+  - Slave server registration: POST to master on startup with server metadata ✓
+  - Health monitoring: periodic heartbeat from slaves, mark servers offline/online ✓
+  - Cross-server device discovery: master aggregates device listings from all slaves ✓
+  - Resilience: slaves operate independently, master handles offline/unreachable servers ✓
+  - API endpoints: `/servers`, `/servers/{id}/devices`, `/register`, `/heartbeat`, `/devices/federated` ✓
 
 ---
 
