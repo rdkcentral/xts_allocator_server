@@ -3,6 +3,7 @@ from routes.allocation_routes import allocation_routes
 from routes.device_routes import device_routes
 from routes.rack_routes import rack_routes
 from routes.export_routes import export_routes
+from routes.health_routes import health_routes
 from models import SessionLocal, Device
 from state_machine import DeviceState, transition_device
 from logging_config import setup_logging, get_logger
@@ -20,6 +21,7 @@ app.blueprint(allocation_routes)
 app.blueprint(device_routes)
 app.blueprint(rack_routes)
 app.blueprint(export_routes)
+app.blueprint(health_routes)
 app.static('/logo.png', './logo.png', name='logo')
 app.static('/xts_allocator.xts', './xts_allocator.xts', name='xts_config')
 

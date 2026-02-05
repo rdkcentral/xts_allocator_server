@@ -71,9 +71,9 @@
   - Log: allocation/deallocation, state transitions, errors, API requests ✓
   - File handler with rotation (RotatingFileHandler), console handler for dev ✓
 
-- [ ] **Create health check and metrics endpoints**
-  - `/health` - status, database connectivity, timestamp
-  - `/metrics` - total_devices, devices_by_state, devices_by_rack, allocations_today, avg_allocation_duration
+- [x] **Create health check and metrics endpoints**
+  - `/health` - status, database connectivity, timestamp ✓
+  - `/metrics` - total_devices, devices_by_state, devices_by_rack, allocations_today, avg_allocation_duration ✓
 
 - [ ] **Build comprehensive test suite**
   - Allocate by ID/platform/tags
