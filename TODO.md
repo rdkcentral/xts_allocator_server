@@ -33,28 +33,33 @@
   - Allows central management and evolution of commands over time ✓
   - **Goal**: Single unified tool (XTS) for engineers to control entire test lifecycle ✓
 
-- [ ] **Design and implement allocator-driven configuration for python_raft**
-  - **Integration architecture**: XTS orchestrates allocator server + python_raft
-    - XTS calls allocator server → receives config → saves locally → invokes raft
-    - XTS is the unified interface for engineers to run entire E2E test workflow
-  - **Server endpoints:**
-    - `/export/raft_config` - return allocator-optimized YAML config
-    - `/export/python_raft_config` - python_raft-compatible rack_config + device_config
-    - Config includes allocation_id for reference
-  - **New allocator config format** (optimized for XTS allocator integration):
-    - Include server communication metadata (allocator_url, allocation_id)
-    - Unified config structure combining device + rack info in single file
-    - Support dynamic/allocated devices vs static rack definitions
-    - Store allocation context (duration, expiry, owner_email) for reference
-  - **Config storage and usage:**
-    - XTS saves config locally when received from allocator
-    - XTS passes config path to raft when invoking tests
-    - Raft loads config for device connection details
-  - **Benefits of new format:**
-    - Not constrained by legacy schema limitations
-    - Optimized for allocation workflow (XTS → allocator → raft)
-    - Can evolve independently while maintaining backward compatibility
-    - Simplifies E2E testing: engineers use XTS commands, everything else is automated
+- [x] **Design and implement allocator-driven configuration for python_raft**
+  - **Integration architecture**: XTS orchestrates allocator server + python_raft ✓
+    - XTS calls allocator server → receives config → saves locally → invokes raft ✓
+    - XTS is the unified interface for engineers to run entire E2E test workflow ✓
+  - **Server endpoints:** ✓
+    - `/export/raft_config` - return allocator-optimized YAML config (new format) ✓
+    - `/export/python_raft_config` - python_raft-compatible manual format (existing rack_config + device_config schema) ✓
+    - Config includes allocation_id for reference ✓
+  - **New allocator-driven config format** (optimized for XTS allocator integration): ✓
+    - Include server communication metadata (allocator_url, allocation_id) ✓
+    - Unified config structure combining device + rack info in single file ✓
+    - Support dynamic/allocated devices vs static rack definitions ✓
+    - Store allocation context (duration, expiry, owner_email) for reference ✓
+  - **Manual config format** (python_raft-compatible): ✓
+    - Follows existing rack_config.yml + device_config.yml structure ✓
+    - Used by python_raft for manually-defined test environments ✓
+    - Allocator generates this format from current device allocation ✓
+    - Maintains compatibility with existing python_raft workflows ✓
+  - **Config storage and usage:** ✓
+    - XTS saves config locally when received from allocator ✓
+    - XTS passes config path to raft when invoking tests ✓
+    - Raft loads config for device connection details ✓
+  - **Benefits of allocator-driven format:** ✓
+    - Not constrained by manual schema limitations ✓
+    - Optimized for allocation workflow (XTS → allocator → raft) ✓
+    - Can evolve independently while maintaining backward compatibility ✓
+    - Simplifies E2E testing: engineers use XTS commands, everything else is automated ✓
 
 - [ ] **Implement AllocationHistory audit trail**
   - Populate AllocationHistory on allocate/deallocate

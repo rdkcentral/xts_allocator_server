@@ -283,3 +283,91 @@ Deletes an existing slot from the database based on the provided slot_id.
   ```
 
 ---
+
+## 8. Export Allocator-Optimized Config
+
+### `GET /export/raft_config`
+
+**Description:**  
+Export allocator-optimized YAML configuration for allocated devices. This format is optimized for XTS allocator integration with unified structure combining device, rack, and allocation metadata.
+
+**Query Parameters:**
+- **`allocation_id`** (integer, optional): Device ID to export config for.
+- **`owner_email`** (string, optional): Filter by owner email.
+
+**Note:** Either `allocation_id` or `owner_email` must be provided.
+
+**Response:**
+- **Success (200):**
+  Returns YAML content with `application/x-yaml` content type.
+  
+  Example structure:
+  ```yaml
+  version: "1.0"
+  generated_at: "2026-02-05T15:21:42Z"
+  allocator:
+    server_url: "http://localhost:5000"
+    api_version: "v1"
+  allocations:
+    - allocation_id: 1
+      allocation_expiry: "2026-02-05T16:21:42Z"
+      owner_email: "user@example.com"
+      state: "allocated"
+      device:
+        id: 1
+        platform: "Cisco"
+        network:
+          host_ipv4: "192.168.1.100"
+        control_uris: {}
+      rack:
+        name: "Rack1"
+        location: "Lab A"
+        slot_name: "Slot1"
+  ```
+
+- **Error (400/404/500):** JSON error response
+
+---
+
+## 9. Export Python RAFT Compatible Config
+
+### `GET /export/python_raft_config`
+
+**Description:**  
+Export python_raft-compatible manual format configuration for allocated devices. Follows existing rack_config.yml + device_config.yml structure.
+
+**Query Parameters:**
+- **`allocation_id`** (integer, optional): Device ID to export config for.
+- **`owner_email`** (string, optional): Filter by owner email.
+
+**Note:** Either `allocation_id` or `owner_email` must be provided.
+
+**Response:**
+- **Success (200):**
+  Returns YAML content with `application/x-yaml` content type.
+  
+  Example structure:
+  ```yaml
+  rack_config:
+    version: "1.0"
+    racks:
+      - name: "Rack1"
+        location: "Lab A"
+        slots:
+          - slot_name: "Slot1"
+            device_id: 1
+  device_config:
+    version: "1.0"
+    devices:
+      - id: 1
+        name: "Rack1_Slot1"
+        platform: "Cisco"
+        network:
+          host_ipv4: "192.168.1.100"
+        allocation:
+          owner: "user@example.com"
+  ```
+
+- **Error (400/404/500):** JSON error response
+
+---
