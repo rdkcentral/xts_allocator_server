@@ -61,10 +61,10 @@
     - Can evolve independently while maintaining backward compatibility ✓
     - Simplifies E2E testing: engineers use XTS commands, everything else is automated ✓
 
-- [ ] **Implement AllocationHistory audit trail**
-  - Populate AllocationHistory on allocate/deallocate
-  - Track: user_email, device_id, start_time, end_time, duration_requested, software_version, state_before/after
-  - Add `GET /allocation_history` endpoint with filters
+- [x] **Implement AllocationHistory audit trail**
+  - Populate AllocationHistory on allocate/deallocate ✓
+  - Track: user_email, device_id, start_time, end_time, duration_requested, software_version, state_before/after ✓
+  - Add `GET /allocation_history` endpoint with filters ✓
 
 - [ ] **Add structured logging framework**
   - Python logging module with INFO/ERROR levels

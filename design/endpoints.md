@@ -371,3 +371,58 @@ Export python_raft-compatible manual format configuration for allocated devices.
 - **Error (400/404/500):** JSON error response
 
 ---
+
+## 10. Allocation History
+
+### `GET /allocation_history`
+
+**Description:**  
+Retrieve allocation history records with optional filters. Tracks all allocation and deallocation events for audit trail and compliance.
+
+**Query Parameters:**
+- **`device_id`** (integer, optional): Filter by specific device ID.
+- **`email`** (string, optional): Filter by user email.
+- **`start_date`** (string, optional): Filter records from this date (ISO format: 2026-02-01).
+- **`end_date`** (string, optional): Filter records until this date (ISO format).
+- **`limit`** (integer, optional, default: 100): Maximum number of records to return.
+
+**Response:**
+- **Success (200):**
+  Returns JSON with history records.
+  
+  Example:
+  ```json
+  {
+    "count": 2,
+    "history": [
+      {
+        "id": 1,
+        "device_id": 2,
+        "device_name": "Rack2_Slot2",
+        "platform": "Dell",
+        "user": "testuser",
+        "email": "test@example.com",
+        "name": "Test User",
+        "start_time": "2026-02-05T15:44:06Z",
+        "end_time": "2026-02-05T17:44:06Z",
+        "duration_requested": 120,
+        "duration_actual": 120,
+        "state_before": "free",
+        "state_after": "free",
+        "software_version": "v2.1.0",
+        "is_active": false
+      }
+    ]
+  }
+  ```
+
+- **Error (400):** Invalid parameter format
+- **Error (500):** Server error
+
+**Notes:**
+- Records are ordered by most recent first
+- `is_active: true` indicates allocation is still active (not yet deallocated)
+- `duration_actual` is calculated from start_time to end_time in minutes
+- History records are automatically created on allocate and closed on deallocate
+
+---

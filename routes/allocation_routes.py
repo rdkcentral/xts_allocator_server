@@ -68,10 +68,27 @@ async def allocate_slot(request):
             if allocation_expiry:
                 slot.allocation_expiry = allocation_expiry
             
+            # Record state before allocation
+            state_before = slot.state
+            
             # Allocate the slot using state machine
             success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
             if not success:
                 return json({"message": message}, status=400)
+            
+            # Create allocation history record
+            history = AllocationHistory(
+                device_id=slot.id,
+                user=user.get("username"),
+                email=user.get("email"),
+                name=user.get("name"),
+                start_time=datetime.utcnow(),
+                duration_requested=duration_minutes,
+                state_before=state_before,
+                software_version=slot.software_version
+            )
+            session.add(history)
+            session.commit()
             
             response = {
                 "message": "Slot allocated successfully",
@@ -80,7 +97,8 @@ async def allocate_slot(request):
                 "rackId": slot.rack_id,
                 "slotName": slot.slot_name,
                 "state": slot.state,
-                "owner_email": slot.owner_email
+                "owner_email": slot.owner_email,
+                "allocation_history_id": history.id
             }
             if allocation_expiry:
                 response["allocation_expiry"] = allocation_expiry.isoformat()
@@ -102,10 +120,27 @@ async def allocate_slot(request):
             if allocation_expiry:
                 slot.allocation_expiry = allocation_expiry
             
+            # Record state before allocation
+            state_before = slot.state
+            
             # Allocate the slot using state machine
             success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
             if not success:
                 return json({"message": message}, status=400)
+            
+            # Create allocation history record
+            history = AllocationHistory(
+                device_id=slot.id,
+                user=user.get("username"),
+                email=user.get("email"),
+                name=user.get("name"),
+                start_time=datetime.utcnow(),
+                duration_requested=duration_minutes,
+                state_before=state_before,
+                software_version=slot.software_version
+            )
+            session.add(history)
+            session.commit()
             
             response = {
                 "message": "Slot allocated successfully",
@@ -114,7 +149,8 @@ async def allocate_slot(request):
                 "rackId": slot.rack_id,
                 "slotName": slot.slot_name,
                 "state": slot.state,
-                "owner_email": slot.owner_email
+                "owner_email": slot.owner_email,
+                "allocation_history_id": history.id
             }
             if allocation_expiry:
                 response["allocation_expiry"] = allocation_expiry.isoformat()
@@ -145,10 +181,26 @@ async def deallocate_slot(request):
         if slot.owner_email != user["email"]:
             return json({"message": "Unauthorized: Email mismatch"}, status=403)
 
+        # Find active allocation history record
+        active_history = session.query(AllocationHistory).filter(
+            AllocationHistory.device_id == slot_id,
+            AllocationHistory.email == user["email"],
+            AllocationHistory.end_time.is_(None)
+        ).order_by(AllocationHistory.start_time.desc()).first()
+        
+        # Record state before deallocation
+        state_after = DeviceState.FREE.value
+        
         # Deallocate using state machine (transition to free)
         success, message = transition_device(slot, DeviceState.FREE.value, session)
         if not success:
             return json({"message": message}, status=400)
+        
+        # Update allocation history record
+        if active_history:
+            active_history.end_time = datetime.utcnow()
+            active_history.state_after = state_after
+            session.commit()
         
         return json({"message": f"Slot {slot_id} is now free"}, status=200)
     
@@ -221,4 +273,73 @@ async def get_valid_states(request, device_id):
         }, status=200)
     finally:
         session.close()
+
+
+@allocation_routes.get("/allocation_history")
+async def get_allocation_history(request):
+    """Get allocation history with optional filters."""
+    session = SessionLocal()
+    try:
+        # Parse query parameters
+        device_id = request.args.get("device_id")
+        email = request.args.get("email")
+        start_date = request.args.get("start_date")  # ISO format: 2026-02-01
+        end_date = request.args.get("end_date")
+        limit = request.args.get("limit", "100")
+        
+        # Build query
+        query = session.query(AllocationHistory).join(Device)
+        
+        if device_id:
+            query = query.filter(AllocationHistory.device_id == int(device_id))
+        if email:
+            query = query.filter(AllocationHistory.email == email)
+        if start_date:
+            start_dt = datetime.fromisoformat(start_date)
+            query = query.filter(AllocationHistory.start_time >= start_dt)
+        if end_date:
+            end_dt = datetime.fromisoformat(end_date)
+            query = query.filter(AllocationHistory.start_time <= end_dt)
+        
+        # Order by most recent first and limit results
+        query = query.order_by(AllocationHistory.start_time.desc())
+        query = query.limit(int(limit))
+        
+        history_records = query.all()
+        
+        # Format response
+        history_list = []
+        for record in history_records:
+            duration_actual = None
+            if record.end_time and record.start_time:
+                duration_actual = int((record.end_time - record.start_time).total_seconds() / 60)
+            
+            history_list.append({
+                "id": record.id,
+                "device_id": record.device_id,
+                "device_name": f"{record.device.rack.name}_{record.device.slot_name}",
+                "platform": record.device.platform,
+                "user": record.user,
+                "email": record.email,
+                "name": record.name,
+                "start_time": record.start_time.isoformat() if record.start_time else None,
+                "end_time": record.end_time.isoformat() if record.end_time else None,
+                "duration_requested": record.duration_requested,
+                "duration_actual": duration_actual,
+                "state_before": record.state_before,
+                "state_after": record.state_after,
+                "software_version": record.software_version,
+                "is_active": record.end_time is None
+            })
+        
+        return json({
+            "count": len(history_list),
+            "history": history_list
+        }, status=200)
+        
+    except ValueError as e:
+        return json({"error": f"Invalid parameter: {str(e)}"}, status=400)
+    except Exception as e:
+        return json({"error": str(e)}, status=500)
+    finally:
         session.close()
