@@ -1,6 +1,7 @@
 from sanic import Blueprint
 from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory, Rack
+from state_machine import DeviceState, can_transition, transition_device, get_valid_transitions, is_valid_state
 
 allocation_routes = Blueprint("allocation_routes")
 
@@ -22,17 +23,21 @@ async def allocate_slot(request):
             slot = session.query(Device).filter(Device.id == slot_id).first()
             if not slot:
                 return json({"message": f"Slot with id {slot_id} not found"}, status=404)
-            if slot.state != "free":
-                return json({"message": f"Slot {slot_id} is already allocated"}, status=409)
+            if slot.state != DeviceState.FREE.value:
+                return json({"message": f"Slot {slot_id} is not free (current state: {slot.state})"}, status=409)
             
-            # Allocate the slot
-            slot.state = "allocated"
+            # Set owner before allocation
             slot.owner_email = user.get("email")
-            session.commit()
+            
+            # Allocate the slot using state machine
+            success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
+            if not success:
+                return json({"message": message}, status=400)
             return json({
                 "message": "Slot allocated successfully",
                 "slot_id": slot.id,
-                "rackName": slot.rack_name,
+                "rackName": slot.rack.name,
+                "rackId": slot.rack_id,
                 "slotName": slot.slot_name,
                 "state": slot.state,
                 "owner_email": slot.owner_email
@@ -40,7 +45,7 @@ async def allocate_slot(request):
 
         # Allocate by platform/tags
         else:
-            query = session.query(Device).filter(Device.state == "free", Device.platform == slot_params["platform"])
+            query = session.query(Device).filter(Device.state == DeviceState.FREE.value, Device.platform == slot_params["platform"])
             if "tags" in slot_params:
                 tags = ",".join(slot_params["tags"])
                 query = query.filter(Device.tags.contains(tags))
@@ -48,10 +53,13 @@ async def allocate_slot(request):
             if not slot:
                 return json({"message": "No free slot matches the criteria", "slots":[]}, status=200)
             
-            # Allocate the slot
-            slot.state = "allocated"
+            # Set owner before allocation
             slot.owner_email = user.get("email")
-            session.commit()
+            
+            # Allocate the slot using state machine
+            success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
+            if not success:
+                return json({"message": message}, status=400)
             return json({
                 "message": "Slot allocated successfully",
                 "slot_id": slot.id,
@@ -86,13 +94,80 @@ async def deallocate_slot(request):
         if slot.owner_email != user["email"]:
             return json({"message": "Unauthorized: Email mismatch"}, status=403)
 
-        slot.state = "free"
-        slot.owner_email = None
-        session.commit()
+        # Deallocate using state machine (transition to free)
+        success, message = transition_device(slot, DeviceState.FREE.value, session)
+        if not success:
+            return json({"message": message}, status=400)
+        
         return json({"message": f"Slot {slot_id} is now free"}, status=200)
     
     except Exception as e:
         session.rollback()
         return json({"message": "Internal server error", "error": str(e)}, status=500)
     finally:
+        session.close()
+
+
+@allocation_routes.post("/change_device_state")
+async def change_device_state(request):
+    """Change device state with validation (for maintenance, offline, etc.)."""
+    session = SessionLocal()
+    try:
+        data = request.json
+        device_id = data.get("device_id")
+        new_state = data.get("state")
+        
+        if not device_id or not new_state:
+            return json({"error": "device_id and state are required"}, status=400)
+        
+        if not is_valid_state(new_state):
+            return json({
+                "error": f"Invalid state: {new_state}",
+                "valid_states": [s.value for s in DeviceState]
+            }, status=400)
+        
+        device = session.query(Device).filter(Device.id == device_id).first()
+        if not device:
+            return json({"error": "Device not found"}, status=404)
+        
+        # Perform state transition
+        success, message = transition_device(device, new_state, session)
+        
+        if success:
+            return json({
+                "message": message,
+                "device_id": device.id,
+                "previous_state": message.split("from ")[1].split(" to")[0] if "from" in message else None,
+                "new_state": device.state,
+                "state_changed_at": device.state_changed_at.isoformat() if device.state_changed_at else None
+            }, status=200)
+        else:
+            return json({"error": message}, status=400)
+    
+    except Exception as e:
+        session.rollback()
+        return json({"error": "Internal server error", "details": str(e)}, status=500)
+    finally:
+        session.close()
+
+
+@allocation_routes.get("/device/<device_id:int>/valid_states")
+async def get_valid_states(request, device_id):
+    """Get valid state transitions for a device."""
+    session = SessionLocal()
+    try:
+        device = session.query(Device).filter(Device.id == device_id).first()
+        if not device:
+            return json({"error": "Device not found"}, status=404)
+        
+        valid_transitions = get_valid_transitions(device.state)
+        
+        return json({
+            "device_id": device.id,
+            "current_state": device.state,
+            "valid_transitions": valid_transitions,
+            "state_changed_at": device.state_changed_at.isoformat() if device.state_changed_at else None
+        }, status=200)
+    finally:
+        session.close()
         session.close()

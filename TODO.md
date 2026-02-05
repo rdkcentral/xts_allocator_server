@@ -8,10 +8,10 @@
   - `/devices/search` - filter by: rack, platform, tags, state, has_equipment_type ✓
   - Update `/list_slots` to include rack info and external equipment ✓
 
-- [ ] **Implement proper state machine (5+ states)**
-  - Expand Device state from free/allocated to: free, allocated, busy (test running), resetting, maintenance, offline
-  - Add state transition validation
-  - Track state_changed_at timestamp
+- [x] **Implement proper state machine (5+ states)**
+  - Expand Device state from free/allocated to: free, allocated, busy, resetting, maintenance, offline ✓
+  - Add state transition validation ✓
+  - Track state_changed_at timestamp ✓
 
 - [ ] **Implement duration-based allocation with expiry**
   - Add duration to allocation request (minutes/hours), calculate expiry
