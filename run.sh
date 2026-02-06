@@ -27,6 +27,42 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Clone development dependencies for integrated development
+setup_dev_repos() {
+    log_info "Checking development dependencies..."
+    
+    # Create 3rdParty directory if not present
+    mkdir -p "${SCRIPT_DIR}/3rdParty"
+    
+    # Clone xts_core if not present
+    if [ ! -d "${SCRIPT_DIR}/3rdParty/xts_core" ]; then
+        log_info "Cloning xts_core repository..."
+        git clone git@github.com:rdkcentral/xts_core.git "${SCRIPT_DIR}/3rdParty/xts_core"
+        if [ $? -ne 0 ]; then
+            log_warn "Failed to clone via SSH, trying HTTPS..."
+            git clone https://github.com/rdkcentral/xts_core.git "${SCRIPT_DIR}/3rdParty/xts_core"
+        fi
+        log_info "xts_core cloned"
+    else
+        log_info "xts_core already present"
+    fi
+    
+    # Clone yaml_runner if not present
+    if [ ! -d "${SCRIPT_DIR}/3rdParty/yaml_runner" ]; then
+        log_info "Cloning yaml_runner repository..."
+        git clone git@github.com:rdkcentral/yaml_runner.git "${SCRIPT_DIR}/3rdParty/yaml_runner"
+        if [ $? -ne 0 ]; then
+            log_warn "Failed to clone via SSH, trying HTTPS..."
+            git clone https://github.com/rdkcentral/yaml_runner.git "${SCRIPT_DIR}/3rdParty/yaml_runner"
+        fi
+        log_info "yaml_runner cloned"
+    else
+        log_info "yaml_runner already present"
+    fi
+    
+    log_info "Development dependencies ready"
+}
+
 # Check if virtual environment exists, create if not
 setup_venv() {
     if [ ! -d "${VENV_DIR}" ]; then
@@ -116,16 +152,19 @@ main() {
     
     case "$COMMAND" in
         start)
+            setup_dev_repos
             setup_venv
             setup_database
             start_server
             ;;
         setup)
+            setup_dev_repos
             setup_venv
             setup_database
             log_info "Setup complete! Run './run.sh' to start the server"
             ;;
         test)
+            setup_dev_repos
             setup_venv
             setup_database
             run_tests

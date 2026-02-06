@@ -8,6 +8,8 @@ venv/
 *.db
 xts_allocator.db
 *.log
-xts_core/
+
+# Development dependencies (cloned separately for integrated development)
+3rdParty/
 
 logs/
