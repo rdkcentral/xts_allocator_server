@@ -12,6 +12,8 @@ from state_machine import DeviceState, transition_device
 from logging_config import setup_logging, get_logger
 from datetime import datetime, timedelta
 import os
+import sys
+import signal
 import asyncio
 
 # Setup logging
@@ -29,7 +31,7 @@ app.blueprint(usage_routes)
 app.blueprint(federation_routes)
 app.blueprint(test_routes)
 app.static('/logo.png', './logo.png', name='logo')
-app.static('/xts_allocator.xts', './xts_allocator.xts', name='xts_config')
+app.static('/xts_allocator.xts', './config/xts_allocator.xts', name='xts_config')
 
 
 async def check_expired_allocations():
@@ -146,7 +148,43 @@ async def main_page(request):
 async def dashboard_page(request):
     return await response.file(os.path.join("templates", "dashboard.html"))
 
+
+def signal_handler(sig, frame):
+    """Handle shutdown signals gracefully."""
+    logger = get_logger()
+    signal_name = signal.Signals(sig).name
+    logger.info(f"Received {signal_name} signal, shutting down gracefully...")
+    sys.exit(0)
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0",
-            port=5000,
-            single_process=True)
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+    signal.signal(signal.SIGTERM, signal_handler)  # kill command
+    
+    try:
+        logger.info("Starting XTS Allocator Server...")
+        app.run(host="0.0.0.0",
+                port=5000,
+                single_process=True)
+    except OSError as e:
+        if e.errno == 98:  # Address already in use
+            logger.error("❌ Port 5000 is already in use. Stop the existing server first.")
+            logger.error("   Run: lsof -ti:5000 | xargs kill")
+            sys.exit(1)
+        else:
+            logger.error(f"❌ Network error: {e}")
+            sys.exit(2)
+    except PermissionError as e:
+        logger.error(f"❌ Permission denied: {e}")
+        logger.error("   Check file permissions or try running with appropriate privileges")
+        sys.exit(3)
+    except ImportError as e:
+        logger.error(f"❌ Missing dependency: {e}")
+        logger.error("   Run: pip install -r requirements.txt")
+        sys.exit(4)
+    except Exception as e:
+        logger.error(f"❌ Unexpected error starting server: {e}", exc_info=True)
+        sys.exit(5)
+    finally:
+        logger.info("XTS Allocator Server stopped")

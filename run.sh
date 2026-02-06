@@ -93,14 +93,14 @@ setup_venv() {
 # Initialize database if it doesn't exist
 setup_database() {
     if [ ! -f "${DB_FILE}" ]; then
-        log_info "Database not found. Initializing..."
-        python "${SCRIPT_DIR}/database_setup.py"
+        log_info "Database not found. Creating with migrations..."
+        ./migrate.sh upgrade
         
         if [ $? -ne 0 ]; then
-            log_error "Failed to initialize database"
+            log_error "Failed to create database"
             exit 1
         fi
-        log_info "Database initialized"
+        log_info "Database created"
         
         # Ask if user wants to populate test data
         read -p "Do you want to populate with test data? (y/N): " -n 1 -r
@@ -110,7 +110,9 @@ setup_database() {
             log_info "Test data populated"
         fi
     else
-        log_info "Database already exists"
+        log_info "Database exists, running migrations..."
+        ./migrate.sh upgrade
+        log_info "Database up to date"
     fi
 }
 
@@ -126,7 +128,7 @@ start_server() {
 # Run tests
 run_tests() {
     log_info "Running tests..."
-    python "${SCRIPT_DIR}/test/test_routes.py"
+    pytest
 }
 
 # Clean everything

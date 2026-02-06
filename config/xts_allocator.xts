@@ -1,0 +1,385 @@
+#****************************************************************************
+# *
+# * If not stated otherwise in this file or this component's LICENSE file
+# * the following copyright and licenses apply:
+# *
+# * Copyright 2026 RDK Management
+# *
+# * Licensed under the Apache License, Version 2.0 (the "License");
+# * you may not use this file except in compliance with the License.
+# * You may obtain a copy of the License at
+# *
+# *
+# * http://www.apache.org/licenses/LICENSE-2.0
+# *
+# * Unless required by applicable law or agreed to in writing, software
+# * distributed under the License is distributed on an "AS IS" BASIS,
+# * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# * See the License for the specific language governing permissions and
+# * limitations under the License.
+# *
+#****************************************************************************
+
+# XTS Allocator Commands
+# 
+# Architecture:
+#   - Server returns JSON only (no formatting)
+#   - This .xts file contains all presentation logic (inline Python formatters)
+#   - Server can upgrade capabilities independently of client
+#   - No external file dependencies - everything self-contained
+#
+# Quick Start:
+#   1. Register server: xts alias add allocator http://server:5000/xts_allocator.xts
+#   2. List devices:    xts allocator list
+#   3. Allocate:        xts allocator alloc_by_id you@example.com 5 2h
+#   4. Release:         xts allocator release you@example.com 5
+#
+# Environment Variables:
+#   XTS_ALLOCATOR_SERVER - Override server URL (default: http://localhost:5000)
+#
+# Duration Format:
+#   30m  = 30 minutes
+#   2h   = 2 hours
+#   90   = 90 minutes (plain number)
+
+# Shared formatter functions (reusable via {{function_name}} syntax)
+functions:
+  format_device_list:
+    description: Format device list from slots array (list endpoints)
+    command: |
+      python3 -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      slots = data.get('slots', [])
+      if not slots:
+          print('\\033[93mNo devices found.\\033[0m')
+          sys.exit(0)
+      print(f'\\n\\033[1m\\033[96mDevice List ({len(slots)} devices):\\033[0m\\n')
+      print('\\033[1m%-4s %-20s %-20s %-12s %-25s %-20s\\033[0m' % ('ID', 'Slot Name', 'Platform', 'State', 'Owner', 'Expires'))
+      print('─' * 110)
+      for s in slots:
+          sid = str(s.get('slot_id', '?'))[:4]
+          name = s.get('slotName', 'Unknown')[:20]
+          plat = s.get('platform', 'Unknown')[:20]
+          state = s.get('state', 'unknown')
+          owner = (s.get('owner_email') or '-')[:25]
+          exp = s.get('allocation_expiry', '-')[:20]
+          sc = '\\033[92m' if state == 'free' else ('\\033[93m' if state == 'allocated' else '\\033[0m')
+          print('\\033[96m%-4s\\033[0m %-20s %-20s %s%-12s\\033[0m %-25s %-20s' % (sid, name, plat, sc, state, owner, exp))
+      print('\\n' + '─' * 110)
+      print('\\033[2mUse xts allocator list --verbose for more details\\033[0m')
+      free = sum(1 for s in slots if s.get('state') == 'free')
+      alloc = sum(1 for s in slots if s.get('state') == 'allocated')
+      print(f'\\n\\033[1mSummary:\\033[0m \\033[92m{free} free\\033[0m, \\033[93m{alloc} allocated\\033[0m')
+      "
+  
+  format_search_results:
+    description: Format device list from results array (search endpoints)
+    command: |
+      python3 -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      results = data.get('results', [])
+      if not results:
+          print('\\033[93mNo devices found.\\033[0m')
+          sys.exit(0)
+      print(f'\\n\\033[1m\\033[96mDevice List ({len(results)} devices):\\033[0m\\n')
+      print('\\033[1m%-4s %-20s %-20s %-12s %-25s %-20s\\033[0m' % ('ID', 'Slot Name', 'Platform', 'State', 'Owner', 'Expires'))
+      print('─' * 110)
+      for r in results:
+          sid = str(r.get('id', '?'))[:4]
+          name = r.get('slot_name', 'Unknown')[:20]
+          plat = r.get('platform', 'Unknown')[:20]
+          state = r.get('state', 'unknown')
+          owner = (r.get('owner_email') or '-')[:25]
+          exp = r.get('allocation_expiry', '-')[:20]
+          sc = '\\033[92m' if state == 'free' else ('\\033[93m' if state == 'allocated' else '\\033[0m')
+          print('\\033[96m%-4s\\033[0m %-20s %-20s %s%-12s\\033[0m %-25s %-20s' % (sid, name, plat, sc, state, owner, exp))
+      print('\\n' + '─' * 110)
+      print('\\033[2mUse xts allocator list --verbose for more details\\033[0m')
+      free = sum(1 for r in results if r.get('state') == 'free')
+      alloc = sum(1 for r in results if r.get('state') == 'allocated')
+      print(f'\\n\\033[1mSummary:\\033[0m \\033[92m{free} free\\033[0m, \\033[93m{alloc} allocated\\033[0m')
+      "
+  
+  format_rack_list:
+    description: Format rack list
+    command: |
+      python3 -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      racks = data.get('racks', [])
+      if not racks:
+          print('\\033[93mNo racks found.\\033[0m')
+          sys.exit(0)
+      print(f'\\n\\033[1m\\033[96mRack List ({len(racks)} racks):\\033[0m\\n')
+      print('\\033[1m%-20s %-25s %-20s %-10s\\033[0m' % ('Name', 'Location', 'Building', 'Devices'))
+      print('─' * 80)
+      for r in racks:
+          name = r.get('name', 'Unknown')[:20]
+          loc = r.get('location', '-')[:25]
+          bld = r.get('building', '-')[:20]
+          cnt = r.get('device_count', 0)
+          print('\\033[96m%-20s\\033[0m %-25s %-20s %-10s' % (name, loc, bld, cnt))
+      print()
+      "
+
+alloc_by_id:
+  description: |
+    Allocate device by specific ID
+    
+    Usage: xts allocator alloc_by_id <email> <device_id> <duration>
+    
+    Examples:
+      xts allocator alloc_by_id user@example.com 5 2h
+      xts allocator alloc_by_id test@dev.com 1 30m
+      xts allocator alloc_by_id admin@test.com 10 90
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"id\": $2}, \"duration\": \"$3\"}"
+  params:
+    passthrough: true
+
+alloc_by_platform:
+  description: |
+    Allocate first available device matching platform
+    
+    Usage: xts allocator alloc_by_platform <email> <platform> <duration>
+    
+    Examples:
+      xts allocator alloc_by_platform user@example.com alpha.uk 2h
+      xts allocator alloc_by_platform test@dev.com beta.us 1h
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"platform\": \"$2\"}, \"duration\": \"$3\"}"
+  params:
+    passthrough: true
+
+alloc_by_tags:
+  description: |
+    Allocate first available device matching tags
+    
+    Usage: xts allocator alloc_by_tags <email> <tags> <duration>
+    
+    Examples:
+      xts allocator alloc_by_tags user@example.com hdmi,4k 2h
+      xts allocator alloc_by_tags test@dev.com production 1h
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"tags\": [\"$2\"]}, \"duration\": \"$3\"}"
+  params:
+    passthrough: true
+
+release:
+  description: |
+    Release an allocated device
+    
+    Usage: xts allocator release <email> <device_id>
+    
+    Examples:
+      xts allocator release user@example.com 5
+      xts allocator release test@dev.com 1
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/deallocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"id\": $2}}"
+  params:
+    passthrough: true
+
+list:
+  description: |
+    List all devices with their current status
+    
+    Usage: xts allocator list
+    
+    Shows: ID, platform, state, owner, rack location
+  command: |
+    curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots | jq -r '
+      "\n\u001b[1m\u001b[96mDevice List (\(.slots | length) devices):\u001b[0m\n",
+      "\u001b[1mID   Slot Name            Platform             State        Owner                     Expires\u001b[0m",
+      "──────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+      (.slots[] | 
+        "\u001b[96m\(.slot_id | tostring | .[0:4])\u001b[0m \(.slotName[0:20] | . + (" " * (20 - length))) \(.platform[0:20] | . + (" " * (20 - length))) \(if .state == "free" then "\u001b[92m" + .state + "        \u001b[0m" elif .state == "allocated" then "\u001b[93m" + .state + "    \u001b[0m" else .state + "        " end) \(if .owner_email then (.owner_email[0:25] | . + (" " * (25 - length))) else "-                        " end) \(if .allocation_expiry then (.allocation_expiry[0:20] | . + (" " * (20 - length))) else "-" end)"
+      ),
+      "",
+      "\u001b[2mSummary:\u001b[0m \u001b[92m\([.slots[] | select(.state == "free")] | length) free\u001b[0m, \u001b[93m\([.slots[] | select(.state == "allocated")] | length) allocated\u001b[0m"
+    '
+
+list_racks:
+  description: |
+    List all racks with device counts
+    
+    Usage: xts allocator list_racks
+    
+    Shows: Rack names and number of devices in each
+  command: curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_racks | {{format_rack_list}}
+
+list_free:
+  description: |
+    List only available (free) devices
+    
+    Usage: xts allocator list_free
+    
+    Example: xts allocator list_free
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
+      -H "Content-Type: application/json" \
+      -d '{"state": "free"}' | jq -r '
+      "\n\u001b[1m\u001b[96mFree Devices (\(.slots | length)):\u001b[0m\n",
+      "\u001b[1mID   Slot Name            Platform             State        Owner                     Expires\u001b[0m",
+      "────────────────────────────────────────────────────────────────────────────────────────────────────",
+      (.slots[] | 
+        "\u001b[96m\(.slot_id | tostring | .[0:4])\u001b[0m \(.slotName[0:20] | . + (" " * (20 - length))) \(.platform[0:20] | . + (" " * (20 - length))) \u001b[92m\(.state)        \u001b[0m \(if .owner_email then (.owner_email[0:25] | . + (" " * (25 - length))) else "-                        " end) \(if .allocation_expiry then (.allocation_expiry[0:20] | . + (" " * (20 - length))) else "-" end)"
+      )
+    '
+
+list_allocated:
+  description: |
+    List currently allocated devices
+    
+    Usage: xts allocator list_allocated
+    
+    Shows: Who has allocated which devices and when they expire
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
+      -H "Content-Type: application/json" \
+      -d '{"state": "allocated"}' | jq -r '
+      "\n\u001b[1m\u001b[96mAllocated Devices (\(.slots | length)):\u001b[0m\n",
+      "\u001b[1mID   Slot Name            Platform             State        Owner                     Expires\u001b[0m",
+      "────────────────────────────────────────────────────────────────────────────────────────────────────",
+      (.slots[] | 
+        "\u001b[96m\(.slot_id | tostring | .[0:4])\u001b[0m \(.slotName[0:20] | . + (" " * (20 - length))) \(.platform[0:20] | . + (" " * (20 - length))) \u001b[93m\(.state)    \u001b[0m \(if .owner_email then (.owner_email[0:25] | . + (" " * (25 - length))) else "-                        " end) \(if .allocation_expiry then (.allocation_expiry[0:20] | . + (" " * (20 - length))) else "-" end)"
+      )
+    '
+
+list_by_platform:
+  description: |
+    List devices filtered by platform
+    
+    Usage: xts allocator list_by_platform <platform>
+    
+    Examples:
+      xts allocator list_by_platform alpha.uk
+      xts allocator list_by_platform beta.us
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
+      -H "Content-Type: application/json" \
+      -d "{\"platform\": \"$1\"}" | {{format_device_list}}
+  params:
+    passthrough: true
+
+search_by_rack:
+  description: |
+    Find devices in a specific rack
+    
+    Usage: xts allocator search_by_rack <rack_name>
+    
+    Examples:
+      xts allocator search_by_rack rack-a
+      xts allocator search_by_rack test-rack-1
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"rack_name\": \"$1\"}" | {{format_search_results}}
+  params:
+    passthrough: true
+
+search_by_platform:
+  description: |
+    Find devices by platform type
+    
+    Usage: xts allocator search_by_platform <platform>
+    
+    Examples:
+      xts allocator search_by_platform alpha.uk
+      xts allocator search_by_platform beta.us
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"platform\": \"$1\"}" | {{format_search_results}}
+  params:
+    passthrough: true
+
+search_by_tags:
+  description: |
+    Find devices matching tags
+    
+    Usage: xts allocator search_by_tags <tags>
+    
+    Examples:
+      xts allocator search_by_tags hdmi
+      xts allocator search_by_tags 4k,production
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"tags\": \"$1\"}" | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    results = data.get('results', [])
+    if not results:
+        print('\\033[93mNo devices found.\\033[0m')
+        sys.exit(0)
+    print(f'\\n\\033[1m\\033[96mDevice List ({len(results)} devices):\\033[0m\\n')
+    print('\\033[1m%-4s %-20s %-20s %-12s %-25s %-20s\\033[0m' % ('ID', 'Slot Name', 'Platform', 'State', 'Owner', 'Expires'))
+    print('─' * 110)
+    for r in results:
+        sid = str(r.get('id', '?'))[:4]
+        name = r.get('slot_name', 'Unknown')[:20]
+        plat = r.get('platform', 'Unknown')[:20]
+        state = r.get('state', 'unknown')
+        owner = (r.get('owner_email') or '-')[:25]
+        exp = r.get('allocation_expiry', '-')[:20]
+        sc = '\\033[92m' if state == 'free' else ('\\033[93m' if state == 'allocated' else '\\033[0m')
+        print('\\033[96m%-4s\\033[0m %-20s %-20s %s%-12s\\033[0m %-25s %-20s' % (sid, name, plat, sc, state, owner, exp))
+    print('\\n' + '─' * 110)
+    print('\\033[2mUse xts allocator list --verbose for more details\\033[0m')
+    free = sum(1 for r in results if r.get('state') == 'free')
+    alloc = sum(1 for r in results if r.get('state') == 'allocated')
+    print(f'\\n\\033[1mSummary:\\033[0m \\033[92m{free} free\\033[0m, \\033[93m{alloc} allocated\\033[0m')
+    "
+  params:
+    passthrough: true
+
+status:
+  description: |
+    Check if allocator server is responding
+    
+    Usage: xts allocator status
+    
+    Returns: Server availability and basic info
+  command: |
+    SERVER="${XTS_ALLOCATOR_SERVER:-http://localhost:5000}"
+    printf "\n\033[1m\033[96mXTS Allocator Server Status\033[0m\n"
+    printf "\033[1mServer:\033[0m $SERVER\n"
+    printf "\n"
+    
+    # Try to get rack list
+    RESPONSE=$(curl -s -w "\n%{http_code}" "$SERVER/list_racks" 2>&1)
+    HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+    BODY=$(echo "$RESPONSE" | sed '$d')
+    
+    if [ "$HTTP_CODE" = "200" ]; then
+      printf "\033[92m✓ Server is online\033[0m\n"
+      printf "\n"
+      
+      # Parse and display rack info
+      RACK_COUNT=$(echo "$BODY" | grep -o '"name"' | wc -l)
+      printf "\033[1mRacks:\033[0m $RACK_COUNT registered\n"
+      
+      # Try to get device count
+      DEVICE_RESPONSE=$(curl -s "$SERVER/list_slots" 2>&1)
+      if [ $? -eq 0 ]; then
+        TOTAL=$(echo "$DEVICE_RESPONSE" | grep -o '"slot_id"' | wc -l)
+        FREE=$(echo "$DEVICE_RESPONSE" | grep -c '"state"[[:space:]]*:[[:space:]]*"free"')
+        ALLOCATED=$(echo "$DEVICE_RESPONSE" | grep -c '"state"[[:space:]]*:[[:space:]]*"allocated"')
+        printf "\033[1mDevices:\033[0m $TOTAL total (\033[92m$FREE free\033[0m, \033[93m$ALLOCATED allocated\033[0m)\n"
+      fi
+    else
+      printf "\033[91m✗ Server is offline or unreachable\033[0m\n"
+      printf "\033[2mHTTP Status: $HTTP_CODE\033[0m\n"
+      exit 1
+    fi
+    printf "\n"

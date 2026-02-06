@@ -4,8 +4,7 @@ import pytest
 class TestUsageStatistics:
     """Test usage statistics and reporting."""
     
-    @pytest.mark.asyncio
-    async def test_device_usage_stats(self, test_client, sample_devices):
+    def test_device_usage_stats(self, test_client, sample_devices):
         """Test device usage statistics endpoint."""
         device = sample_devices[0]
         
@@ -15,16 +14,16 @@ class TestUsageStatistics:
             "slot": {"id": device.id},
             "duration": "1h"
         }
-        await test_client.post("/allocate_slot", json=alloc_request)
+        test_client.post("/allocate_slot", json=alloc_request)
         
         dealloc_request = {
             "user": {"email": "user1@example.com"},
             "slot": {"id": device.id}
         }
-        await test_client.post("/deallocate_slot", json=dealloc_request)
+        test_client.post("/deallocate_slot", json=dealloc_request)
         
         # Get usage stats
-        _, response = await test_client.get(f"/device/{device.id}/usage_stats")
+        _, response = test_client.get(f"/device/{device.id}/usage_stats")
         
         assert response.status == 200
         data = response.json
@@ -35,20 +34,18 @@ class TestUsageStatistics:
         assert data["statistics"]["total_allocations"] >= 1
         assert "recent_allocations" in data
     
-    @pytest.mark.asyncio
-    async def test_device_usage_stats_not_found(self, test_client):
+    def test_device_usage_stats_not_found(self, test_client):
         """Test usage stats for nonexistent device."""
-        _, response = await test_client.get("/device/99999/usage_stats")
+        _, response = test_client.get("/device/99999/usage_stats")
         
         assert response.status == 404
         assert "not found" in response.json["error"]
     
-    @pytest.mark.asyncio
-    async def test_device_usage_stats_no_history(self, test_client, sample_devices):
+    def test_device_usage_stats_no_history(self, test_client, sample_devices):
         """Test usage stats for device with no allocation history."""
         device = sample_devices[0]
         
-        _, response = await test_client.get(f"/device/{device.id}/usage_stats")
+        _, response = test_client.get(f"/device/{device.id}/usage_stats")
         
         assert response.status == 200
         data = response.json
@@ -56,8 +53,7 @@ class TestUsageStatistics:
         assert data["statistics"]["total_test_executions"] == 0
         assert len(data["recent_allocations"]) == 0
     
-    @pytest.mark.asyncio
-    async def test_device_usage_stats_multiple_allocations(self, test_client, sample_devices):
+    def test_device_usage_stats_multiple_allocations(self, test_client, sample_devices):
         """Test usage stats with multiple allocations."""
         device = sample_devices[0]
         
@@ -68,23 +64,22 @@ class TestUsageStatistics:
                 "slot": {"id": device.id},
                 "duration": "30m"
             }
-            await test_client.post("/allocate_slot", json=alloc_request)
+            test_client.post("/allocate_slot", json=alloc_request)
             
             dealloc_request = {
                 "user": {"email": f"user{i}@example.com"},
                 "slot": {"id": device.id}
             }
-            await test_client.post("/deallocate_slot", json=dealloc_request)
+            test_client.post("/deallocate_slot", json=dealloc_request)
         
-        _, response = await test_client.get(f"/device/{device.id}/usage_stats")
+        _, response = test_client.get(f"/device/{device.id}/usage_stats")
         
         assert response.status == 200
         data = response.json
         assert data["statistics"]["total_allocations"] == 3
         assert len(data["recent_allocations"]) == 3
     
-    @pytest.mark.asyncio
-    async def test_usage_summary_default(self, test_client, sample_devices):
+    def test_usage_summary_default(self, test_client, sample_devices):
         """Test system-wide usage summary with default parameters."""
         # Create some allocations
         device = sample_devices[0]
@@ -93,9 +88,9 @@ class TestUsageStatistics:
             "slot": {"id": device.id},
             "duration": "1h"
         }
-        await test_client.post("/allocate_slot", json=alloc_request)
+        test_client.post("/allocate_slot", json=alloc_request)
         
-        _, response = await test_client.get("/usage_summary")
+        _, response = test_client.get("/usage_summary")
         
         assert response.status == 200
         data = response.json
@@ -106,17 +101,15 @@ class TestUsageStatistics:
         assert "total_allocations" in data["statistics"]
         assert "top_devices" in data
     
-    @pytest.mark.asyncio
-    async def test_usage_summary_custom_period(self, test_client, sample_devices):
+    def test_usage_summary_custom_period(self, test_client, sample_devices):
         """Test usage summary with custom time period."""
-        _, response = await test_client.get("/usage_summary?days=7")
+        _, response = test_client.get("/usage_summary?days=7")
         
         assert response.status == 200
         data = response.json
         assert data["period_days"] == 7
     
-    @pytest.mark.asyncio
-    async def test_usage_summary_allocation_types(self, test_client, sample_devices):
+    def test_usage_summary_allocation_types(self, test_client, sample_devices):
         """Test usage summary tracks allocation types."""
         device1 = sample_devices[0]
         device2 = sample_devices[1]
@@ -127,16 +120,16 @@ class TestUsageStatistics:
             "slot": {"id": device1.id},
             "duration": "1h"
         }
-        await test_client.post("/allocate_slot", json=temp_request)
+        test_client.post("/allocate_slot", json=temp_request)
         
         # Permanent allocation
         perm_request = {
             "user": {"email": "engineer@example.com"},
             "slot": {"id": device2.id}
         }
-        await test_client.post("/allocate_permanent", json=perm_request)
+        test_client.post("/allocate_permanent", json=perm_request)
         
-        _, response = await test_client.get("/usage_summary")
+        _, response = test_client.get("/usage_summary")
         
         assert response.status == 200
         data = response.json
@@ -144,8 +137,7 @@ class TestUsageStatistics:
         assert stats["temporary_allocations"] >= 1
         assert stats["permanent_allocations"] >= 1
     
-    @pytest.mark.asyncio
-    async def test_usage_summary_unique_users(self, test_client, sample_devices):
+    def test_usage_summary_unique_users(self, test_client, sample_devices):
         """Test usage summary counts unique users."""
         device = sample_devices[0]
         
@@ -156,23 +148,22 @@ class TestUsageStatistics:
                 "slot": {"id": device.id},
                 "duration": "30m"
             }
-            await test_client.post("/allocate_slot", json=alloc_request)
+            test_client.post("/allocate_slot", json=alloc_request)
             
             dealloc_request = {
                 "user": {"email": "user1@example.com"},
                 "slot": {"id": device.id}
             }
-            await test_client.post("/deallocate_slot", json=dealloc_request)
+            test_client.post("/deallocate_slot", json=dealloc_request)
         
-        _, response = await test_client.get("/usage_summary")
+        _, response = test_client.get("/usage_summary")
         
         assert response.status == 200
         data = response.json
         # Should count user1 only once despite multiple allocations
         assert data["statistics"]["unique_users"] >= 1
     
-    @pytest.mark.asyncio
-    async def test_usage_summary_top_devices(self, test_client, sample_devices):
+    def test_usage_summary_top_devices(self, test_client, sample_devices):
         """Test usage summary shows top devices by usage."""
         device = sample_devices[0]
         
@@ -183,15 +174,15 @@ class TestUsageStatistics:
                 "slot": {"id": device.id},
                 "duration": "15m"
             }
-            await test_client.post("/allocate_slot", json=alloc_request)
+            test_client.post("/allocate_slot", json=alloc_request)
             
             dealloc_request = {
                 "user": {"email": f"user{i}@example.com"},
                 "slot": {"id": device.id}
             }
-            await test_client.post("/deallocate_slot", json=dealloc_request)
+            test_client.post("/deallocate_slot", json=dealloc_request)
         
-        _, response = await test_client.get("/usage_summary")
+        _, response = test_client.get("/usage_summary")
         
         assert response.status == 200
         data = response.json

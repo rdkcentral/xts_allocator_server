@@ -41,6 +41,23 @@ That's it! The script automatically:
 ./run.sh clean    # Remove venv and database
 ```
 
+### Stop Server
+
+```bash
+./stop.sh         # Gracefully stop running server
+```
+
+The stop script will:
+- Find the server process on port 5000
+- Send SIGTERM for graceful shutdown (10s timeout)
+- Force kill if needed
+- Provide clear status messages
+
+**Exit Codes:**
+- `0` - Success (server stopped)
+- `1` - Failed to stop server
+- `2` - Non-Python process on port 5000
+
 ### Manual Control (Alternative)
 
 If you prefer step-by-step control:
@@ -75,6 +92,21 @@ python app.py
 ```
 
 Server runs on `http://0.0.0.0:5000`
+
+**Server Exit Codes:**
+
+- `0` - Normal shutdown (Ctrl+C or SIGTERM)
+- `1` - Port 5000 already in use
+- `2` - Network/socket error
+- `3` - Permission denied
+- `4` - Missing dependencies
+- `5` - Unexpected error
+
+**Graceful Shutdown:**
+
+- Press `Ctrl+C` to stop the server gracefully
+- Signal handlers ensure clean shutdown of background tasks
+- Or use `./stop.sh` to stop a running server
 
 ### Client Commands (Future CLI)
 

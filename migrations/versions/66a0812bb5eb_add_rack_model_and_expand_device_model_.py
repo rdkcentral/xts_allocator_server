@@ -33,20 +33,23 @@ def upgrade() -> None:
     op.create_index(op.f('ix_racks_id'), 'racks', ['id'], unique=False)
     op.create_index(op.f('ix_racks_name'), 'racks', ['name'], unique=True)
     
-    # Step 2: Migrate existing rack_name data to racks table
+    # Step 2: Migrate existing rack_name data to racks table (if devices table exists)
     # Get database connection
     conn = op.get_bind()
     
-    # Get unique rack names from devices
-    result = conn.execute(sa.text("SELECT DISTINCT rack_name FROM devices WHERE rack_name IS NOT NULL"))
-    rack_names = [row[0] for row in result]
-    
-    # Insert unique racks
-    for rack_name in rack_names:
-        conn.execute(
-            sa.text("INSERT INTO racks (name) VALUES (:name)"),
-            {"name": rack_name}
-        )
+    # Check if devices table exists before trying to migrate data
+    inspector = sa.inspect(conn)
+    if 'devices' in inspector.get_table_names():
+        # Get unique rack names from devices
+        result = conn.execute(sa.text("SELECT DISTINCT rack_name FROM devices WHERE rack_name IS NOT NULL"))
+        rack_names = [row[0] for row in result]
+        
+        # Insert unique racks
+        for rack_name in rack_names:
+            conn.execute(
+                sa.text("INSERT INTO racks (name) VALUES (:name)"),
+                {"name": rack_name}
+            )
     
     # Step 3: SQLite doesn't support ALTER COLUMN, so we need to use batch operations
     # Add all new device columns in one batch

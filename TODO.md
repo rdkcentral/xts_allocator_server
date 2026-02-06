@@ -150,6 +150,52 @@
 
 ---
 
+## Phase 4: Flutter-based GUI (Cross-platform Client)
+
+**Goal: Native mobile and desktop applications for device management**
+
+- [ ] **Flutter project setup**
+  - Create new Flutter project in `xts_allocator_flutter/` directory
+  - Set up project structure with screens, models, services, widgets
+  - Configure for multi-platform (Android, iOS, Windows, macOS, Linux, Web)
+  - Add dependencies: http/dio, provider/riverpod, flutter_secure_storage
+
+- [ ] **API client implementation**
+  - Create REST API service layer for all allocator endpoints
+  - Implement models for Device, AllocationHistory, TestExecution, Server
+  - Add authentication/authorization with user email storage
+  - Handle error responses and network failures gracefully
+
+- [ ] **Core screens**
+  - Device list screen: grid/list view with filters (state, platform, tags, search)
+  - Device detail screen: full device info, allocation history, usage stats
+  - Allocation screen: temporary/permanent allocation with duration picker
+  - Test execution screen: start test, monitor progress, heartbeat display
+  - Usage statistics screen: charts and metrics (per-device and system-wide)
+
+- [ ] **Advanced features**
+  - Real-time updates: polling or WebSocket for device state changes
+  - Push notifications: allocation expiry warnings, test completion alerts
+  - Offline support: cache device list, queue actions for later sync
+  - Federation support: switch between multiple allocator servers
+  - QR code scanner: quick device allocation by scanning rack labels
+
+- [ ] **State management and UX**
+  - Implement Provider/Riverpod for app-wide state
+  - Add loading states, error handling, retry logic
+  - Material Design for Android, Cupertino for iOS
+  - Responsive layouts for tablet/desktop
+  - Dark mode support
+
+- [ ] **Testing and deployment**
+  - Unit tests for API client and business logic
+  - Widget tests for UI components
+  - Integration tests for core workflows
+  - Build release APK/IPA/executables
+  - Publish to stores or distribute internally
+
+---
+
 ## External Dependencies (Coordinate with other teams)
 
 **Note:** We control all repos - can raise tickets and branch using git flow for coordinated development across
