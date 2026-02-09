@@ -7,7 +7,7 @@ import yaml
 class TestConfigExport:
     """Test configuration export functionality."""
     
-    def test_export_raft_config(self, test_client, sample_devices):
+    def test_export_raft_config(self, test_client, sample_devices, auth_headers_engineer):
         """Test exporting allocator-optimized raft config."""
         # Allocate a device first
         test_client.post(
@@ -15,7 +15,8 @@ class TestConfigExport:
             json={
                 "user": {"email": "test@example.com"},
                 "slot": {"id": sample_devices[0].id}
-            }
+            },
+            headers=auth_headers_engineer
         )
         
         # Export config
@@ -34,7 +35,7 @@ class TestConfigExport:
         assert len(config["allocations"]) == 1
         assert config["allocations"][0]["allocation_id"] == sample_devices[0].id
     
-    def test_export_python_raft_config(self, test_client, sample_devices):
+    def test_export_python_raft_config(self, test_client, sample_devices, auth_headers_engineer):
         """Test exporting python_raft-compatible config."""
         # Allocate a device
         test_client.post(
@@ -42,7 +43,8 @@ class TestConfigExport:
             json={
                 "user": {"email": "test@example.com"},
                 "slot": {"id": sample_devices[0].id}
-            }
+            },
+            headers=auth_headers_engineer
         )
         
         # Export config
@@ -59,7 +61,7 @@ class TestConfigExport:
         assert config["rack_config"]["version"] == "1.0"
         assert len(config["device_config"]["devices"]) == 1
     
-    def test_export_filter_by_email(self, test_client, sample_devices):
+    def test_export_filter_by_email(self, test_client, sample_devices, auth_headers_engineer):
         """Test exporting config filtered by owner email."""
         # Allocate devices to different users
         test_client.post(
@@ -67,14 +69,16 @@ class TestConfigExport:
             json={
                 "user": {"email": "user1@example.com"},
                 "slot": {"id": sample_devices[0].id}
-            }
+            },
+            headers=auth_headers_engineer
         )
         test_client.post(
             "/allocate_slot",
             json={
                 "user": {"email": "user2@example.com"},
                 "slot": {"id": sample_devices[1].id}
-            }
+            },
+            headers=auth_headers_engineer
         )
         
         # Export for user1 only

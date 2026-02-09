@@ -6,14 +6,15 @@ import pytest
 class TestStateTransitions:
     """Test device state machine transitions."""
     
-    def test_change_state_to_maintenance(self, test_client, sample_devices):
+    def test_change_state_to_maintenance(self, test_client, sample_devices, auth_headers_admin):
         """Test changing device state to maintenance."""
         request, response = test_client.post(
             "/change_device_state",
             json={
                 "device_id": sample_devices[0].id,
                 "state": "maintenance"
-            }
+            },
+            headers=auth_headers_admin
         )
         
         assert response.status == 200
@@ -21,14 +22,15 @@ class TestStateTransitions:
         assert data["new_state"] == "maintenance"
         assert "state_changed_at" in data
     
-    def test_change_state_invalid(self, test_client, sample_devices):
+    def test_change_state_invalid(self, test_client, sample_devices, auth_headers_admin):
         """Test changing to invalid state."""
         request, response = test_client.post(
             "/change_device_state",
             json={
                 "device_id": sample_devices[0].id,
                 "state": "invalid_state"
-            }
+            },
+            headers=auth_headers_admin
         )
         
         assert response.status == 400

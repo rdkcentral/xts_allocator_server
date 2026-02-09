@@ -51,7 +51,7 @@ class TestDeviceListings:
 class TestDeviceCRUD:
     """Test device CRUD operations."""
     
-    def test_add_device(self, test_client, sample_racks):
+    def test_add_device(self, test_client, sample_racks, auth_headers_engineer):
         """Test adding a new device."""
         request, response = test_client.post(
             "/add_slot",
@@ -61,24 +61,26 @@ class TestDeviceCRUD:
                 "platform": "TestPlatform",
                 "tags": ["test", "new"],
                 "description": "Test device"
-            }
+            },
+            headers=auth_headers_engineer
         )
         
         assert response.status == 201
         assert "slot_id" in response.json
         assert response.json["message"] == "Slot added successfully"
     
-    def test_add_device_missing_required(self, test_client, sample_racks):
+    def test_add_device_missing_required(self, test_client, sample_racks, auth_headers_engineer):
         """Test adding device without required fields."""
         request, response = test_client.post(
             "/add_slot",
-            json={"platform": "TestPlatform"}
+            json={"platform": "TestPlatform"},
+            headers=auth_headers_engineer
         )
         
         assert response.status == 400
         assert "Missing required fields" in response.json["error"]
     
-    def test_update_device(self, test_client, sample_devices):
+    def test_update_device(self, test_client, sample_devices, auth_headers_engineer):
         """Test updating device information."""
         request, response = test_client.post(
             "/update_slot",
@@ -86,40 +88,44 @@ class TestDeviceCRUD:
                 "slot_id": sample_devices[0].id,
                 "platform": "UpdatedPlatform",
                 "description": "Updated description"
-            }
+            },
+            headers=auth_headers_engineer
         )
         
         assert response.status == 200
         assert "updated successfully" in response.json["message"]
     
-    def test_update_nonexistent_device(self, test_client, sample_devices):
+    def test_update_nonexistent_device(self, test_client, sample_devices, auth_headers_engineer):
         """Test updating non-existent device."""
         request, response = test_client.post(
             "/update_slot",
             json={
                 "slot_id": 99999,
                 "platform": "Test"
-            }
+            },
+            headers=auth_headers_engineer
         )
         
         assert response.status == 404
         assert "not found" in response.json["error"]
     
-    def test_delete_device(self, test_client, sample_devices):
+    def test_delete_device(self, test_client, sample_devices, auth_headers_engineer):
         """Test deleting a device."""
         request, response = test_client.post(
             "/delete_slot",
-            json={"slot_id": sample_devices[0].id}
+            json={"slot_id": sample_devices[0].id},
+            headers=auth_headers_engineer
         )
         
         assert response.status == 200
         assert "deleted successfully" in response.json["message"]
     
-    def test_delete_nonexistent_device(self, test_client, sample_devices):
+    def test_delete_nonexistent_device(self, test_client, sample_devices, auth_headers_engineer):
         """Test deleting non-existent device."""
         request, response = test_client.post(
             "/delete_slot",
-            json={"slot_id": 99999}
+            json={"slot_id": 99999},
+            headers=auth_headers_engineer
         )
         
         assert response.status == 404

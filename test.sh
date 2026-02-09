@@ -2,18 +2,23 @@
 # xts_allocator_server test runner
 # Usage: ./test.sh [options] [test_path]
 #   Options:
-#     -v, --verbose     Verbose output
-#     -k PATTERN        Run tests matching pattern
-#     -x, --exitfirst   Exit on first failure
-#     -s, --capture=no  Show print statements
-#     --lf              Run last failed tests
-#     --ff              Run failed tests first
-#     -h, --help        Show this help
+#     -v, --verbose          Verbose output
+#     -k PATTERN             Run tests matching pattern
+#     -x, --exitfirst        Exit on first failure
+#     -s, --capture=no       Show print statements
+#     --lf                   Run last failed tests
+#     --ff                   Run failed tests first
+#     --tb=style             Traceback style (short/long/line/native/no)
+#     -h, --help             Show this help
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
+
+# Automatically use test database
+export XTS_MODE=test
+export SQLITE_DB_PATH=xts_allocator_test.db
 
 # Colors
 GREEN='\033[0;32m'
@@ -32,18 +37,23 @@ if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
     echo "  -s, --capture=no      Show print statements"
     echo "  --lf                  Run last failed tests"
     echo "  --ff                  Run failed tests first"
+    echo "  --tb=style            Traceback style (short/long/line/native/no)"
     echo "  -h, --help            Show this help"
     echo ""
     echo "Examples:"
-    echo "  ./test.sh                                    # Run all tests"
-    echo "  ./test.sh tests/test_allocation.py           # Run specific test file"
-    echo "  ./test.sh -k federation                      # Run tests matching 'federation'"
-    echo "  ./test.sh -x tests/test_devices.py           # Stop on first failure"
-    echo "  ./test.sh --lf                               # Re-run last failures"
+    echo "  ./test.sh                                                          # Run all tests"
+    echo "  ./test.sh tests/test_allocation.py                                 # Run specific test file"
+    echo "  ./test.sh tests/test_federation.py::TestFederatedServers           # Run specific test class"
+    echo "  ./test.sh tests/test_federation.py::TestFederatedServers::test_register_server_new  # Run specific test"
+    echo "  ./test.sh -k federation                                            # Run tests matching 'federation'"
+    echo "  ./test.sh -x tests/test_devices.py                                 # Stop on first failure"
+    echo "  ./test.sh --lf                                                     # Re-run last failures"
+    echo "  ./test.sh --tb=line tests/test_allocation.py                       # Concise traceback"
     exit 0
 fi
 
-echo -e "${GREEN}Running xts_allocator_server tests...${NC}\n"
+echo -e "${GREEN}Running xts_allocator_server tests...${NC}"
+echo -e "${YELLOW}Database mode: TEST (xts_allocator_test.db)${NC}\n"
 
 # Activate venv if it exists
 if [ -d "venv" ]; then
@@ -87,7 +97,11 @@ while [[ $# -gt 0 ]]; do
             PYTEST_ARGS="$PYTEST_ARGS --ff"
             shift
             ;;
-        tests/*)
+        --tb=*)
+            PYTEST_ARGS="$PYTEST_ARGS $1"
+            shift
+            ;;
+        tests/*|*/test_*.py)
             TEST_PATH="$1"
             shift
             ;;

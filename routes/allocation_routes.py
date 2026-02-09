@@ -4,6 +4,9 @@ from models import SessionLocal, Device, AllocationHistory, Rack
 from state_machine import DeviceState, can_transition, transition_device, get_valid_transitions, is_valid_state
 from logging_config import get_logger
 from datetime import datetime, timedelta
+from rate_limiter import rate_limit, user_email_identifier
+from input_validation import validate_user_data, validate_integer, validate_string, ValidationError
+from auth import require_auth, ROLE_ENGINEER, ROLE_ADMIN, get_user_from_request
 
 allocation_routes = Blueprint("allocation_routes")
 logger = get_logger()
@@ -33,17 +36,33 @@ def parse_duration(duration_str):
 
 
 @allocation_routes.post("/allocate_slot")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
 async def allocate_slot(request):
     """Allocate a free slot to a user with optional duration."""
     session = SessionLocal()
     try:
         data = request.json
+        
+        # Validate user data
+        try:
+            validate_user_data(data.get("user", {}))
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+        
         user = data["user"]
         slot_params = data["slot"]
         duration_str = data.get("duration")  # e.g., "2h", "30m", "90m"
 
         if not slot_params.get("id") and not slot_params.get("platform"):
             return json({"message": "Either 'id' or 'platform' must be provided"}, status=400)
+        
+        # Validate duration string if provided
+        if duration_str:
+            try:
+                duration_str = validate_string(duration_str, "duration", max_length=20, required=False)
+            except ValidationError as e:
+                return json({"error": str(e)}, status=400)
         
         # Parse duration if provided
         duration_minutes = None
@@ -58,7 +77,12 @@ async def allocate_slot(request):
 
         # Allocate by slot_id if provided
         if "id" in slot_params:
-            slot_id = slot_params["id"]
+            # Validate slot_id
+            try:
+                slot_id = validate_integer(slot_params["id"], "slot_id", min_value=1)
+            except ValidationError as e:
+                return json({"error": str(e)}, status=400)
+            
             slot = session.query(Device).filter(Device.id == slot_id).first()
             if not slot:
                 return json({"message": f"Slot with id {slot_id} not found"}, status=404)
@@ -176,13 +200,27 @@ async def allocate_slot(request):
 
 
 @allocation_routes.post("/deallocate_slot")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
 async def deallocate_slot(request):
     """Deallocate a previously allocated slot, making it available to other users."""
     session = SessionLocal()
     try:
         data = request.json
+        
+        # Validate user data
+        try:
+            validate_user_data(data.get("user", {}))
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+        
         user = data["user"]
-        slot_id = data["slot"]["id"]
+        
+        # Validate slot_id
+        try:
+            slot_id = validate_integer(data["slot"]["id"], "slot_id", min_value=1)
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
 
         slot = session.query(Device).filter(Device.id == slot_id).first()
 
@@ -216,7 +254,7 @@ async def deallocate_slot(request):
         else:
             logger.warning(f"Slot deallocated but no active history found: device_id={slot_id}, email={user['email']}")
         
-        return json({"message": f"Slot {slot_id} is now free"}, status=200)
+        return json({"message": "Slot deallocated successfully"}, status=200)
     
     except Exception as e:
         session.rollback()
@@ -227,16 +265,25 @@ async def deallocate_slot(request):
 
 
 @allocation_routes.post("/change_device_state")
+@require_auth(ROLE_ADMIN)
+@rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
 async def change_device_state(request):
     """Change device state with validation (for maintenance, offline, etc.)."""
     session = SessionLocal()
     try:
         data = request.json
-        device_id = data.get("device_id")
-        new_state = data.get("state")
         
-        if not device_id or not new_state:
-            return json({"error": "device_id and state are required"}, status=400)
+        # Validate device_id
+        try:
+            device_id = validate_integer(data.get("device_id"), "device_id", min_value=1)
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+        
+        # Validate new_state
+        try:
+            new_state = validate_string(data.get("state"), "state", max_length=20)
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
         
         if not is_valid_state(new_state):
             return json({

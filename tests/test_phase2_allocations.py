@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 class TestPermanentAllocations:
     """Test permanent allocation features."""
     
-    def test_allocate_permanent_success(self, test_client, sample_devices):
+    def test_allocate_permanent_success(self, test_client, sample_devices, auth_headers_engineer):
         """Test permanent allocation of a device."""
         device = sample_devices[0]
         
@@ -14,7 +14,7 @@ class TestPermanentAllocations:
             "slot": {"id": device.id}
         }
         
-        _, response = test_client.post("/allocate_permanent", json=request_data)
+        _, response = test_client.post("/allocate_permanent", json=request_data, headers=auth_headers_engineer)
         
         assert response.status == 200
         data = response.json
@@ -24,7 +24,7 @@ class TestPermanentAllocations:
         assert "allocation_expiry" not in data  # No expiry for permanent
         assert data["owner_email"] == "engineer@example.com"
     
-    def test_allocate_permanent_not_free(self, test_client, sample_devices):
+    def test_allocate_permanent_not_free(self, test_client, sample_devices, auth_headers_engineer):
         """Test permanent allocation fails for non-free device."""
         device = sample_devices[0]
         
@@ -34,7 +34,7 @@ class TestPermanentAllocations:
             "slot": {"id": device.id},
             "duration": "1h"
         }
-        test_client.post("/allocate_slot", json=temp_request)
+        test_client.post("/allocate_slot", json=temp_request, headers=auth_headers_engineer)
         
         # Try permanent allocation on allocated device
         perm_request = {
@@ -42,36 +42,36 @@ class TestPermanentAllocations:
             "slot": {"id": device.id}
         }
         
-        _, response = test_client.post("/allocate_permanent", json=perm_request)
+        _, response = test_client.post("/allocate_permanent", json=perm_request, headers=auth_headers_engineer)
         
         assert response.status == 409
         assert "not free" in response.json["message"]
     
-    def test_allocate_permanent_missing_id(self, test_client):
+    def test_allocate_permanent_missing_id(self, test_client, auth_headers_engineer):
         """Test permanent allocation requires device ID."""
         request_data = {
             "user": {"email": "engineer@example.com"},
             "slot": {}
         }
         
-        _, response = test_client.post("/allocate_permanent", json=request_data)
+        _, response = test_client.post("/allocate_permanent", json=request_data, headers=auth_headers_engineer)
         
         assert response.status == 400
         assert "'id' must be provided" in response.json["message"]
     
-    def test_allocate_permanent_device_not_found(self, test_client):
+    def test_allocate_permanent_device_not_found(self, test_client, auth_headers_engineer):
         """Test permanent allocation with nonexistent device."""
         request_data = {
             "user": {"email": "engineer@example.com"},
             "slot": {"id": 99999}
         }
         
-        _, response = test_client.post("/allocate_permanent", json=request_data)
+        _, response = test_client.post("/allocate_permanent", json=request_data, headers=auth_headers_engineer)
         
         assert response.status == 404
         assert "not found" in response.json["message"]
     
-    def test_permanent_allocation_not_expired(self, test_client, sample_devices):
+    def test_permanent_allocation_not_expired(self, test_client, sample_devices, auth_headers_engineer):
         """Test that permanent allocations are not expired by background task."""
         device = sample_devices[0]
         
@@ -81,7 +81,7 @@ class TestPermanentAllocations:
             "slot": {"id": device.id}
         }
         
-        _, response = test_client.post("/allocate_permanent", json=request_data)
+        _, response = test_client.post("/allocate_permanent", json=request_data, headers=auth_headers_engineer)
         assert response.status == 200
         
         # Check device state
@@ -93,7 +93,7 @@ class TestPermanentAllocations:
         assert allocated_device["allocation_type"] == "permanent"
         assert allocated_device["allocation_expiry"] is None
     
-    def test_deallocate_permanent_allocation(self, test_client, sample_devices):
+    def test_deallocate_permanent_allocation(self, test_client, sample_devices, auth_headers_engineer):
         """Test deallocation of permanently allocated device."""
         device = sample_devices[0]
         
@@ -102,7 +102,7 @@ class TestPermanentAllocations:
             "user": {"email": "engineer@example.com"},
             "slot": {"id": device.id}
         }
-        test_client.post("/allocate_permanent", json=alloc_request)
+        test_client.post("/allocate_permanent", json=alloc_request, headers=auth_headers_engineer)
         
         # Deallocate
         dealloc_request = {
@@ -110,7 +110,7 @@ class TestPermanentAllocations:
             "slot": {"id": device.id}
         }
         
-        _, response = test_client.post("/deallocate_slot", json=dealloc_request)
+        _, response = test_client.post("/deallocate_slot", json=dealloc_request, headers=auth_headers_engineer)
         
         assert response.status == 200
         assert response.json["message"] == "Slot deallocated successfully"

@@ -7,6 +7,8 @@ from routes.health_routes import health_routes
 from routes.usage_routes import usage_routes
 from routes.federation_routes import federation_routes
 from routes.test_routes import test_routes
+from routes.auth_routes import auth_routes
+from routes.audit_log_routes import audit_log_bp
 from models import SessionLocal, Device, TestExecution
 from state_machine import DeviceState, transition_device
 from logging_config import setup_logging, get_logger
@@ -30,8 +32,36 @@ app.blueprint(health_routes)
 app.blueprint(usage_routes)
 app.blueprint(federation_routes)
 app.blueprint(test_routes)
+app.blueprint(auth_routes)
+app.blueprint(audit_log_bp)
 app.static('/logo.png', './logo.png', name='logo')
 app.static('/xts_allocator.xts', './config/xts_allocator.xts', name='xts_config')
+
+# CORS Configuration
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+CORS_ENABLED = os.environ.get("CORS_ENABLED", "true").lower() == "true"
+
+@app.middleware("response")
+async def add_cors_headers(request, response):
+    """Add CORS headers to all responses."""
+    if not CORS_ENABLED:
+        return
+    
+    origin = request.headers.get("Origin")
+    
+    # Check if origin is allowed
+    if CORS_ORIGINS == ["*"] or origin in CORS_ORIGINS:
+        allowed_origin = origin if origin else "*"
+        response.headers["Access-Control-Allow-Origin"] = allowed_origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Max-Age"] = "3600"
+
+@app.options("/<path:path>")
+async def options_handler(request, path):
+    """Handle OPTIONS requests for CORS preflight."""
+    return response.empty()
 
 
 async def check_expired_allocations():

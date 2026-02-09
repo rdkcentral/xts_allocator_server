@@ -1,9 +1,60 @@
 """Pytest configuration and fixtures for test suite."""
 
 import pytest
-from models import Base, engine, SessionLocal, Device, Rack
+import os
+from models import Base, engine, SessionLocal, Device, Rack, Server, TestExecution, AllocationHistory, AuditLog
 from app import app as sanic_app
 from datetime import datetime
+from auth import generate_token, ROLE_ENGINEER, ROLE_ADMIN, ROLE_READONLY
+
+# Ensure tests always use test database
+os.environ['XTS_MODE'] = 'test'
+os.environ['SQLITE_DB_PATH'] = 'xts_allocator_test.db'
+
+# Create all tables once at the start of the test session
+@pytest.fixture(scope="session", autouse=True)
+def setup_database():
+    """Set up database tables for all tests."""
+    Base.metadata.create_all(bind=engine)
+    yield
+    # Optionally clean up after all tests
+    # Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def clean_database():
+    """Clean database before AND after each test to ensure isolation."""
+    # Clean before test
+    session = SessionLocal()
+    try:
+        session.query(AllocationHistory).delete()
+        session.query(TestExecution).delete()
+        session.query(Device).delete()
+        session.query(Rack).delete()
+        session.query(Server).delete()
+        session.query(AuditLog).delete()
+        session.commit()
+    except Exception:
+        session.rollback()
+    finally:
+        session.close()
+    
+    yield  # Run test
+    
+    # Clean after test
+    session = SessionLocal()
+    try:
+        session.query(AllocationHistory).delete()
+        session.query(TestExecution).delete()
+        session.query(Device).delete()
+        session.query(Rack).delete()
+        session.query(Server).delete()
+        session.query(AuditLog).delete()
+        session.commit()
+    except Exception:
+        session.rollback()
+    finally:
+        session.close()
 
 
 @pytest.fixture
@@ -18,12 +69,30 @@ def test_client(app):
     return app.test_client
 
 
+@pytest.fixture
+def auth_headers_engineer():
+    """Generate Authorization header for engineer role."""
+    token = generate_token("engineer@example.com", ROLE_ENGINEER)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def auth_headers_admin():
+    """Generate Authorization header for admin role."""
+    token = generate_token("admin@example.com", ROLE_ADMIN)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def auth_headers_readonly():
+    """Generate Authorization header for readonly role."""
+    token = generate_token("viewer@example.com", ROLE_READONLY)
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest.fixture(scope="function")
 def db_session():
     """Create a fresh database session for each test."""
-    # Create all tables
-    Base.metadata.create_all(bind=engine)
-    
     session = SessionLocal()
     try:
         yield session
@@ -33,8 +102,6 @@ def db_session():
         raise
     finally:
         session.close()
-        # Clean up tables after test
-        Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture

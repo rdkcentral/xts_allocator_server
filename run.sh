@@ -7,7 +7,14 @@ set -e  # Exit on error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/venv"
-DB_FILE="${SCRIPT_DIR}/xts_allocator.db"
+
+# Set database mode (development by default, unless already set)
+if [ -z "${XTS_MODE}" ]; then
+    export XTS_MODE=development
+    export SQLITE_DB_PATH=xts_allocator.db
+fi
+
+DB_FILE="${SCRIPT_DIR}/${SQLITE_DB_PATH}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -119,6 +126,7 @@ setup_database() {
 # Start the server
 start_server() {
     log_info "Starting XTS Allocator Server..."
+    log_info "Database mode: ${XTS_MODE} (${SQLITE_DB_PATH})"
     log_info "Server will be available at http://localhost:5000"
     log_info "Press Ctrl+C to stop"
     echo ""
@@ -166,6 +174,10 @@ main() {
             log_info "Setup complete! Run './run.sh' to start the server"
             ;;
         test)
+            # Override to test mode for running tests
+            export XTS_MODE=test
+            export SQLITE_DB_PATH=xts_allocator_test.db
+            DB_FILE="${SCRIPT_DIR}/xts_allocator_test.db"
             setup_dev_repos
             setup_venv
             setup_database

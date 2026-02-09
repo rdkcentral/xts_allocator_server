@@ -4,12 +4,17 @@ from models import SessionLocal, Device, AllocationHistory, TestExecution
 from state_machine import DeviceState, transition_device
 from logging_config import get_logger
 from datetime import datetime, timedelta
+from rate_limiter import rate_limit, user_email_identifier
+from input_validation import validate_integer, validate_string, validate_email, ValidationError
+from auth import require_auth, ROLE_ENGINEER
 
 test_routes = Blueprint("test_routes")
 logger = get_logger()
 
 
 @test_routes.post("/start_test")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
 async def start_test(request):
     """
     Start test execution on an allocated device.
@@ -19,14 +24,16 @@ async def start_test(request):
     try:
         data = request.json
         
-        device_id = data.get("device_id")
-        test_name = data.get("test_name")
-        test_suite = data.get("test_suite")
-        expected_duration = data.get("expected_duration")  # in minutes
-        user_email = data.get("user_email")
-        
-        if not device_id or not test_name:
-            return json({"error": "device_id and test_name are required"}, status=400)
+        # Validate inputs
+        try:
+            device_id = validate_integer(data.get("device_id"), "device_id", min_value=1)
+            test_name = validate_string(data.get("test_name"), "test_name", max_length=255)
+            test_suite = validate_string(data.get("test_suite"), "test_suite", max_length=255, required=False)
+            expected_duration = validate_integer(data.get("expected_duration"), "expected_duration", 
+                                                min_value=1, max_value=1440, required=False)  # Max 24 hours
+            user_email = validate_email(data.get("user_email"), required=False)
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
         
         # Get device
         device = session.query(Device).filter(Device.id == device_id).first()
@@ -114,6 +121,7 @@ async def start_test(request):
 
 
 @test_routes.post("/test_heartbeat")
+@rate_limit(max_requests=120, window_seconds=60, identifier_fn=user_email_identifier)
 async def test_heartbeat(request):
     """
     Update heartbeat for active test execution.
@@ -167,6 +175,8 @@ async def test_heartbeat(request):
 
 
 @test_routes.post("/end_test")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=60, window_seconds=60, identifier_fn=user_email_identifier)
 async def end_test(request):
     """
     End test execution and transition device back to allocated state.

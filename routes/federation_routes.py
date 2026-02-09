@@ -188,7 +188,7 @@ async def get_server_details(request, server_id):
             "last_heartbeat": server.last_heartbeat.isoformat() + "Z" if server.last_heartbeat else None,
             "metadata": server.server_metadata,
             "created_at": server.created_at.isoformat() + "Z",
-            "updated_at": server.updated_at.isoformat() + "Z"
+            "updated_at": getattr(server, "updated_at").isoformat() + "Z" if hasattr(server, "updated_at") else server.created_at.isoformat() + "Z"
         }
         
         return json(server_details, status=200)

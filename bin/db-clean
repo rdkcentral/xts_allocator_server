@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+# Database Cleaner
+# Cleans test database or clears device registrations
+
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+usage() {
+    cat << EOF
+${BLUE}XTS Allocator - Database Cleaner${NC}
+
+Clean or reset database for testing.
+
+${GREEN}Usage:${NC}
+    $(basename $0) <action> [options]
+
+${GREEN}Actions:${NC}
+    test-reset      - Delete and rebuild test database
+    clear-devices   - Remove all device registrations
+    clear-history   - Clear allocation history (keep devices)
+    clear-tests     - Clear test execution records
+    clear-all       - Clear all data (keep schema)
+    
+${GREEN}Options:${NC}
+    -f, --force     - Skip confirmation prompts
+    -q, --quiet     - Minimal output
+
+${GREEN}Examples:${NC}
+    $(basename $0) test-reset           # Rebuild test database
+    $(basename $0) clear-devices -f     # Clear devices without confirmation
+    $(basename $0) clear-history        # Clear allocation history
+
+${YELLOW}Safety:${NC} These actions only work on TEST database (xts_allocator_test.db)
+To clean production database, set XTS_MODE=test first.
+
+EOF
+    exit 1
+}
+
+confirm() {
+    local message=$1
+    if [ "$FORCE" = true ]; then
+        return 0
+    fi
+    
+    echo -e "${YELLOW}⚠${NC}  $message"
+    read -p "Continue? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${RED}✗${NC} Cancelled"
+        exit 1
+    fi
+}
+
+get_db_path() {
+    local mode=${XTS_MODE:-development}
+    if [ "$mode" = "test" ]; then
+        echo "xts_allocator_test.db"
+    else
+        echo "xts_allocator.db"
+    fi
+}
+
+check_test_mode() {
+    local db_path=$(get_db_path)
+    
+    if [ "$db_path" != "xts_allocator_test.db" ] && [ "$FORCE" != true ]; then
+        echo -e "${RED}Error:${NC} Not in TEST mode!"
+        echo -e "Current database: ${YELLOW}$db_path${NC}"
+        echo -e ""
+        echo -e "To clean test database:"
+        echo -e "  ${BLUE}export XTS_MODE=test${NC}"
+        echo -e "  ${BLUE}$(basename $0) $1${NC}"
+        echo -e ""
+        echo -e "Or use force flag to clean current database:"
+        echo -e "  ${BLUE}$(basename $0) $1 --force${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓${NC} Operating on: ${YELLOW}$db_path${NC}"
+}
+
+test_reset() {
+    check_test_mode "test-reset"
+    
+    local db_path=$(get_db_path)
+    
+    confirm "This will DELETE and rebuild $db_path"
+    
+    echo -e "${BLUE}→${NC} Stopping server..."
+    pkill -f "python.*app.py" 2>/dev/null || true
+    sleep 1
+    
+    echo -e "${BLUE}→${NC} Removing database..."
+    rm -f "$PROJECT_ROOT/$db_path"
+    
+    echo -e "${BLUE}→${NC} Creating new database..."
+    cd "$PROJECT_ROOT"
+    source env.sh
+    export XTS_MODE=test
+    export SQLITE_DB_PATH=$db_path
+    python database_setup.py
+    
+    echo -e "${GREEN}✓${NC} Test database rebuilt: $db_path"
+    echo -e "${BLUE}→${NC} Start server: ${YELLOW}./run.sh${NC}"
+}
+
+clear_devices() {
+    check_test_mode "clear-devices"
+    
+    confirm "This will REMOVE ALL device registrations"
+    
+    cd "$PROJECT_ROOT"
+    source env.sh
+    export XTS_MODE=test
+    
+    python << 'PYEOF'
+from models import Device, SessionLocal
+session = SessionLocal()
+try:
+    count = session.query(Device).count()
+    session.query(Device).delete()
+    session.commit()
+    print(f"✓ Removed {count} devices")
+except Exception as e:
+    session.rollback()
+    print(f"✗ Error: {e}")
+finally:
+    session.close()
+PYEOF
+    
+    echo -e "${GREEN}✓${NC} Device registrations cleared"
+}
+
+clear_history() {
+    check_test_mode "clear-history"
+    
+    confirm "This will CLEAR all allocation history"
+    
+    cd "$PROJECT_ROOT"
+    source env.sh
+    export XTS_MODE=test
+    
+    python << 'PYEOF'
+from models import AllocationHistory, SessionLocal
+session = SessionLocal()
+try:
+    count = session.query(AllocationHistory).count()
+    session.query(AllocationHistory).delete()
+    session.commit()
+    print(f"✓ Removed {count} history records")
+except Exception as e:
+    session.rollback()
+    print(f"✗ Error: {e}")
+finally:
+    session.close()
+PYEOF
+    
+    echo -e "${GREEN}✓${NC} Allocation history cleared"
+}
+
+clear_tests() {
+    check_test_mode "clear-tests"
+    
+    confirm "This will CLEAR all test execution records"
+    
+    cd "$PROJECT_ROOT"
+    source env.sh
+    export XTS_MODE=test
+    
+    python << 'PYEOF'
+from models import TestExecution, SessionLocal
+session = SessionLocal()
+try:
+    count = session.query(TestExecution).count()
+    session.query(TestExecution).delete()
+    session.commit()
+    print(f"✓ Removed {count} test records")
+except Exception as e:
+    session.rollback()
+    print(f"✗ Error: {e}")
+finally:
+    session.close()
+PYEOF
+    
+    echo -e "${GREEN}✓${NC} Test execution records cleared"
+}
+
+clear_all() {
+    check_test_mode "clear-all"
+    
+    confirm "This will CLEAR ALL DATA (devices, history, tests, allocations)"
+    
+    cd "$PROJECT_ROOT"
+    source env.sh
+    export XTS_MODE=test
+    
+    python << 'PYEOF'
+from models import Device, AllocationHistory, TestExecution, Rack, SessionLocal
+session = SessionLocal()
+try:
+    # Clear in order to respect foreign keys
+    test_count = session.query(TestExecution).count()
+    session.query(TestExecution).delete()
+    
+    history_count = session.query(AllocationHistory).count()
+    session.query(AllocationHistory).delete()
+    
+    device_count = session.query(Device).count()
+    session.query(Device).delete()
+    
+    rack_count = session.query(Rack).count()
+    session.query(Rack).delete()
+    
+    session.commit()
+    
+    print(f"✓ Removed:")
+    print(f"  - {test_count} test executions")
+    print(f"  - {history_count} history records")
+    print(f"  - {device_count} devices")
+    print(f"  - {rack_count} racks")
+except Exception as e:
+    session.rollback()
+    print(f"✗ Error: {e}")
+finally:
+    session.close()
+PYEOF
+    
+    echo -e "${GREEN}✓${NC} All data cleared"
+}
+
+# Parse arguments
+FORCE=false
+QUIET=false
+ACTION=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -f|--force)
+            FORCE=true
+            shift
+            ;;
+        -q|--quiet)
+            QUIET=true
+            shift
+            ;;
+        test-reset|clear-devices|clear-history|clear-tests|clear-all)
+            ACTION=$1
+            shift
+            ;;
+        *)
+            echo -e "${RED}Error:${NC} Unknown option: $1"
+            usage
+            ;;
+    esac
+done
+
+if [ -z "$ACTION" ]; then
+    usage
+fi
+
+cd "$PROJECT_ROOT"
+
+case $ACTION in
+    test-reset)
+        test_reset
+        ;;
+    clear-devices)
+        clear_devices
+        ;;
+    clear-history)
+        clear_history
+        ;;
+    clear-tests)
+        clear_tests
+        ;;
+    clear-all)
+        clear_all
+        ;;
+esac

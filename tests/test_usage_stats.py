@@ -4,7 +4,7 @@ import pytest
 class TestUsageStatistics:
     """Test usage statistics and reporting."""
     
-    def test_device_usage_stats(self, test_client, sample_devices):
+    def test_device_usage_stats(self, test_client, sample_devices, auth_headers_engineer):
         """Test device usage statistics endpoint."""
         device = sample_devices[0]
         
@@ -14,13 +14,13 @@ class TestUsageStatistics:
             "slot": {"id": device.id},
             "duration": "1h"
         }
-        test_client.post("/allocate_slot", json=alloc_request)
+        test_client.post("/allocate_slot", json=alloc_request, headers=auth_headers_engineer)
         
         dealloc_request = {
             "user": {"email": "user1@example.com"},
             "slot": {"id": device.id}
         }
-        test_client.post("/deallocate_slot", json=dealloc_request)
+        test_client.post("/deallocate_slot", json=dealloc_request, headers=auth_headers_engineer)
         
         # Get usage stats
         _, response = test_client.get(f"/device/{device.id}/usage_stats")
@@ -53,7 +53,7 @@ class TestUsageStatistics:
         assert data["statistics"]["total_test_executions"] == 0
         assert len(data["recent_allocations"]) == 0
     
-    def test_device_usage_stats_multiple_allocations(self, test_client, sample_devices):
+    def test_device_usage_stats_multiple_allocations(self, test_client, sample_devices, auth_headers_engineer):
         """Test usage stats with multiple allocations."""
         device = sample_devices[0]
         
@@ -64,13 +64,13 @@ class TestUsageStatistics:
                 "slot": {"id": device.id},
                 "duration": "30m"
             }
-            test_client.post("/allocate_slot", json=alloc_request)
+            test_client.post("/allocate_slot", json=alloc_request, headers=auth_headers_engineer)
             
             dealloc_request = {
                 "user": {"email": f"user{i}@example.com"},
                 "slot": {"id": device.id}
             }
-            test_client.post("/deallocate_slot", json=dealloc_request)
+            test_client.post("/deallocate_slot", json=dealloc_request, headers=auth_headers_engineer)
         
         _, response = test_client.get(f"/device/{device.id}/usage_stats")
         
@@ -79,7 +79,7 @@ class TestUsageStatistics:
         assert data["statistics"]["total_allocations"] == 3
         assert len(data["recent_allocations"]) == 3
     
-    def test_usage_summary_default(self, test_client, sample_devices):
+    def test_usage_summary_default(self, test_client, sample_devices, auth_headers_engineer):
         """Test system-wide usage summary with default parameters."""
         # Create some allocations
         device = sample_devices[0]
@@ -88,7 +88,7 @@ class TestUsageStatistics:
             "slot": {"id": device.id},
             "duration": "1h"
         }
-        test_client.post("/allocate_slot", json=alloc_request)
+        test_client.post("/allocate_slot", json=alloc_request, headers=auth_headers_engineer)
         
         _, response = test_client.get("/usage_summary")
         
@@ -109,7 +109,7 @@ class TestUsageStatistics:
         data = response.json
         assert data["period_days"] == 7
     
-    def test_usage_summary_allocation_types(self, test_client, sample_devices):
+    def test_usage_summary_allocation_types(self, test_client, sample_devices, auth_headers_engineer):
         """Test usage summary tracks allocation types."""
         device1 = sample_devices[0]
         device2 = sample_devices[1]
@@ -120,14 +120,14 @@ class TestUsageStatistics:
             "slot": {"id": device1.id},
             "duration": "1h"
         }
-        test_client.post("/allocate_slot", json=temp_request)
+        test_client.post("/allocate_slot", json=temp_request, headers=auth_headers_engineer)
         
         # Permanent allocation
         perm_request = {
             "user": {"email": "engineer@example.com"},
             "slot": {"id": device2.id}
         }
-        test_client.post("/allocate_permanent", json=perm_request)
+        test_client.post("/allocate_permanent", json=perm_request, headers=auth_headers_engineer)
         
         _, response = test_client.get("/usage_summary")
         
@@ -137,7 +137,7 @@ class TestUsageStatistics:
         assert stats["temporary_allocations"] >= 1
         assert stats["permanent_allocations"] >= 1
     
-    def test_usage_summary_unique_users(self, test_client, sample_devices):
+    def test_usage_summary_unique_users(self, test_client, sample_devices, auth_headers_engineer):
         """Test usage summary counts unique users."""
         device = sample_devices[0]
         
@@ -148,13 +148,13 @@ class TestUsageStatistics:
                 "slot": {"id": device.id},
                 "duration": "30m"
             }
-            test_client.post("/allocate_slot", json=alloc_request)
+            test_client.post("/allocate_slot", json=alloc_request, headers=auth_headers_engineer)
             
             dealloc_request = {
                 "user": {"email": "user1@example.com"},
                 "slot": {"id": device.id}
             }
-            test_client.post("/deallocate_slot", json=dealloc_request)
+            test_client.post("/deallocate_slot", json=dealloc_request, headers=auth_headers_engineer)
         
         _, response = test_client.get("/usage_summary")
         
@@ -163,7 +163,7 @@ class TestUsageStatistics:
         # Should count user1 only once despite multiple allocations
         assert data["statistics"]["unique_users"] >= 1
     
-    def test_usage_summary_top_devices(self, test_client, sample_devices):
+    def test_usage_summary_top_devices(self, test_client, sample_devices, auth_headers_engineer):
         """Test usage summary shows top devices by usage."""
         device = sample_devices[0]
         
@@ -174,13 +174,13 @@ class TestUsageStatistics:
                 "slot": {"id": device.id},
                 "duration": "15m"
             }
-            test_client.post("/allocate_slot", json=alloc_request)
+            test_client.post("/allocate_slot", json=alloc_request, headers=auth_headers_engineer)
             
             dealloc_request = {
                 "user": {"email": f"user{i}@example.com"},
                 "slot": {"id": device.id}
             }
-            test_client.post("/deallocate_slot", json=dealloc_request)
+            test_client.post("/deallocate_slot", json=dealloc_request, headers=auth_headers_engineer)
         
         _, response = test_client.get("/usage_summary")
         

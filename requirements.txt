@@ -9,3 +9,5 @@ PyYAML==6.0.2
 pytest==8.0.0
 pytest-asyncio==0.23.5
 sanic-testing==24.6.0
+PyJWT==2.8.0
+psycopg2-binary==2.9.9

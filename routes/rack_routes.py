@@ -2,6 +2,7 @@ from sanic import Blueprint
 from sanic.response import json
 from sqlalchemy import func, case
 from models import SessionLocal, Rack, Device
+from rate_limiter import rate_limit, user_email_identifier
 
 rack_routes = Blueprint("rack_routes")
 
@@ -124,6 +125,7 @@ async def get_rack_devices(request, rack_id):
 
 
 @rack_routes.post("/devices/search")
+@rate_limit(max_requests=60, window_seconds=60, identifier_fn=user_email_identifier)
 async def search_devices(request):
     """Advanced search for devices with multiple filters."""
     session = SessionLocal()

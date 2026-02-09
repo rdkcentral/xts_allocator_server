@@ -2,6 +2,8 @@ from sanic import Blueprint
 from sanic.response import json
 from sqlalchemy import func
 from models import SessionLocal, Device, Rack
+from rate_limiter import rate_limit, user_email_identifier
+from auth import require_auth, ROLE_ENGINEER, ROLE_READONLY
 
 device_routes = Blueprint("device_routes")
 
@@ -14,6 +16,7 @@ async def list_slots(request):
         slots_list = [
             {
                 "slot_id": slot.id,
+                "id": slot.id,  # Add id for compatibility
                 "rackName": slot.rack.name,
                 "rackId": slot.rack_id,
                 "rackLocation": slot.rack.location,
@@ -24,6 +27,7 @@ async def list_slots(request):
                 "tags": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
                 "owner_email": slot.owner_email,
+                "allocation_type": slot.allocation_type,
                 "allocation_expiry": slot.allocation_expiry.isoformat() if slot.allocation_expiry else None,
                 "make": slot.make,
                 "model": slot.model,
@@ -37,6 +41,7 @@ async def list_slots(request):
 
 
 @device_routes.post("/list_slots")
+@rate_limit(max_requests=60, window_seconds=60, identifier_fn=user_email_identifier)
 async def list_slots_filters(request):
     """Retrieve slots from the database based on specific filter criteria."""
     session = SessionLocal()
@@ -91,6 +96,8 @@ def update_slot_fields(slot, data, session):
         slot.tags = ",".join(data["tags"]) if isinstance(data["tags"], list) else data["tags"]
 
 @device_routes.post("/add_slot")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=20, window_seconds=60, identifier_fn=user_email_identifier)
 async def add_slot(request):
     """Add a new slot to the database."""
     session = SessionLocal()
@@ -132,6 +139,8 @@ async def add_slot(request):
         session.close()
 
 @device_routes.post("/update_slot")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
 async def update_slot_info(request):
     """Update an existing slot in the database."""
     session = SessionLocal()
@@ -158,6 +167,8 @@ async def update_slot_info(request):
         session.close()
 
 @device_routes.post("/delete_slot")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=20, window_seconds=60, identifier_fn=user_email_identifier)
 async def delete_slot(request):
     """Delete a slot from the database."""
     session = SessionLocal()

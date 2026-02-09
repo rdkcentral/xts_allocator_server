@@ -146,23 +146,107 @@ Server runs on `http://0.0.0.0:5000`
 
 ```text
 ├── run.sh              # Universal run script (START HERE!)
+├── stop.sh             # Stop running server
+├── test-safe.sh        # Run tests with test database
 ├── env.sh              # Manual venv activation
 ├── app.py              # Sanic server entry point
-├── models.py           # Database models (Device, AllocationHistory)
-├── config.py           # Configuration settings
+├── models.py           # Database models (6 tables)
+├── config.py           # Multi-environment configuration
 ├── database_setup.py   # Database initialization
+├── state_machine.py    # Device state transition logic
+├── auth.py             # JWT authentication & RBAC
+├── rate_limiter.py     # API rate limiting
+├── audit_log.py        # Security event logging
 ├── requirements.txt    # Python dependencies
-├── routes/             # API route blueprints
-│   ├── allocation_routes.py    # Allocate/deallocate operations
-│   └── device_routes.py        # Device CRUD operations
+├── bin/                # Database management utilities
+│   ├── db-status       # Show database configuration
+│   ├── db-switch       # Switch between test/production
+│   └── db-clean        # Clean/reset test database
+├── routes/             # API route blueprints (10 blueprints)
+│   ├── allocation_routes.py    # Allocate/deallocate
+│   ├── device_routes.py        # Device CRUD
+│   ├── test_routes.py          # Test execution tracking
+│   ├── auth_routes.py          # Authentication
+│   ├── audit_log_routes.py     # Audit log queries
+│   └── ...
 ├── templates/          # HTML templates
-│   └── index.html
-├── test/               # Test scripts
-│   ├── test_routes.py
+│   └── dashboard.html
+├── test/               # Test scripts and utilities
+│   ├── add_pi_devices.py
+│   ├── demo_pi_simple.py
+│   ├── demo_db_management.sh
 │   └── populate_database.py
-└── design/             # Design documentation
-    └── endpoints.md
+├── tests/              # pytest test suite (15 test modules)
+└── docs/               # Documentation
+    ├── DATABASE_MANAGEMENT.md
+    ├── AUTHENTICATION.md
+    └── POSTGRESQL_MIGRATION.md
 ```
+
+---
+
+## 🗄️ Database Management
+
+The system supports **separate test and production databases** for safe testing and development.
+
+### Quick Database Commands
+
+```bash
+# Check current database status
+bin/db-status
+
+# Switch to test mode (safe for experiments)
+bin/db-switch test
+
+# Reset test database (clear all data)
+bin/db-clean test-reset
+
+# Clear device registrations from test DB
+bin/db-clean clear-devices
+
+# Run tests with test database
+./test-safe.sh
+```
+
+### Database Modes
+
+1. **test** - Isolated test database (`xts_allocator_test.db`)
+   - Can be freely rebuilt/cleaned
+   - Used by test suite automatically
+   - Safe for experimentation
+
+2. **development** - Working database (`xts_allocator.db`)  
+   - Your main development database
+   - Persistent across sessions
+   - Default mode
+
+3. **production** - Production database
+   - PostgreSQL (recommended) or SQLite
+   - Protected from accidental cleaning
+   - Requires explicit configuration
+
+### Typical Workflow
+
+```bash
+# Daily development
+./run.sh                    # Uses development database
+
+# Running tests
+./test-safe.sh              # Automatically uses test database
+
+# API testing
+bin/db-switch test          # Switch to test mode
+bin/db-clean test-reset     # Clean slate
+./run.sh                    # Start with clean test DB
+# ... test your API ...
+bin/db-clean clear-all      # Clean up
+
+# Back to development
+bin/db-switch development
+./run.sh
+```
+
+See [DATABASE_MANAGEMENT.md](DATABASE_MANAGEMENT.md) for complete guide.
 
 ---
 
