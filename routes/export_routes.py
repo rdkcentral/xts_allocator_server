@@ -2,16 +2,11 @@ from sanic import Blueprint
 from sanic.response import text, json as json_response
 from models import SessionLocal, Device, Rack
 import yaml
-from datetime import datetime
+from datetime import datetime, timezone
+
+from routes.utils import build_target_id
 
 export_routes = Blueprint("export_routes")
-
-
-def build_target_id(device):
-    """Build a stable allocation target identifier for a device."""
-    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
-    platform = device.platform or "unknown"
-    return f"{platform}@{rack_name}/{device.slot_name}"
 
 
 def _get_allocated_devices(session, request):
@@ -88,7 +83,7 @@ def _build_platform_profiles(devices, request):
     return {
         "schema_version": "2.0",
         "profile_type": "python_raft_device_profile",
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         "allocator": {
             "url": f"http://{request.host}"
         },
@@ -165,7 +160,7 @@ def _build_rack_config(devices, request):
     return {
         "schema_version": "2.0",
         "profile_type": "python_raft_rack_config",
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         "allocator": {
             "url": f"http://{request.host}"
         },
@@ -229,7 +224,7 @@ async def export_raft_config(request):
         # Build allocator-optimized config
         config = {
             "version": "1.0",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
             "allocator": {
                 "server_url": f"http://{request.host}",
                 "api_version": "v1"
@@ -385,7 +380,7 @@ async def export_python_raft_config(request):
             },
             "metadata": {
                 "generated_by": "xts_allocator_server",
-                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
                 "allocator_url": f"http://{request.host}"
             }
         }

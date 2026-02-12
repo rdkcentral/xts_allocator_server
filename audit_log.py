@@ -11,7 +11,7 @@ All audit logs are persisted to the database for forensic analysis and complianc
 
 from models import AuditLog, SessionLocal
 from logging_config import get_logger
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import uuid
 
@@ -105,7 +105,7 @@ def log_audit_event(
             request_id = str(uuid.uuid4())
         
         audit_entry = AuditLog(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             event_type=event_type,
             event_category=event_category,
             severity=severity,

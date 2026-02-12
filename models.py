@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, JSON, UniqueConstraint, Index, Text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from config import config
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 # Get database URL from config
@@ -37,7 +37,7 @@ class Rack(Base):
     location = Column(String, nullable=True)  # Room/floor identifier
     building = Column(String, nullable=True)  # Building name/code
     description = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationship to devices in this rack
     devices = relationship("Device", back_populates="rack", cascade="all, delete-orphan")
@@ -83,7 +83,7 @@ class Device(Base):
     tags = Column(String, nullable=True)  # Comma-separated for now, consider proper tagging later
     description = Column(String, nullable=True)
     state = Column(String, default="free", nullable=False, index=True)  # free, allocated, busy, resetting, maintenance, offline
-    state_changed_at = Column(DateTime, default=datetime.utcnow)
+    state_changed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Allocation details
     owner_email = Column(String, nullable=True, index=True)
@@ -98,8 +98,8 @@ class Device(Base):
     system_metrics = Column(JSON, nullable=True)  # CPU, memory, uptime, etc.
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Constraints
     __table_args__ = (
@@ -126,7 +126,7 @@ class AllocationHistory(Base):
     name = Column(String)  # Full name (if available)
     
     # Allocation timing
-    start_time = Column(DateTime, nullable=False, default=datetime.utcnow)
+    start_time = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     end_time = Column(DateTime, nullable=True)
     duration_requested = Column(Integer, nullable=True)  # Minutes requested
     allocation_type = Column(String, default="temporary")  # temporary or permanent
@@ -160,7 +160,7 @@ class Server(Base):
     device_count = Column(Integer, default=0)  # Cached device count
     last_heartbeat = Column(DateTime, nullable=True)  # Last heartbeat from slave
     server_metadata = Column(JSON, nullable=True)  # Additional server metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class TestExecution(Base):
@@ -182,7 +182,7 @@ class TestExecution(Base):
     max_duration = Column(Integer, default=240)  # Maximum allowed duration (4 hours default)
     
     # Test lifecycle
-    start_time = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    start_time = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     end_time = Column(DateTime, nullable=True)
     last_heartbeat = Column(DateTime, nullable=True)
     heartbeat_timeout = Column(Integer, default=10)  # Minutes without heartbeat before considering hung
@@ -211,7 +211,7 @@ class AuditLog(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     
     # Timestamp
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     
     # Event categorization
     event_type = Column(String, nullable=False, index=True)  # auth_login, auth_failure, auth_logout, allocation, deallocation, state_change, device_add, device_update, device_delete, test_start, test_end, unauthorized_access

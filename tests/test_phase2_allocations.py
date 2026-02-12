@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class TestPermanentAllocations:
@@ -199,6 +199,6 @@ class TestDeviceStatusTracking:
         # Parse and verify timestamp is recent
         from datetime import datetime
         last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
-        now = datetime.utcnow().replace(tzinfo=last_seen_dt.tzinfo)
+        now = datetime.now(timezone.utc).replace(tzinfo=last_seen_dt.tzinfo)
         delta = (now - last_seen_dt).total_seconds()
         assert delta < 5  # Should be within 5 seconds

@@ -5,7 +5,7 @@ Implements simple in-memory rate limiting using a sliding window approach.
 For production, consider Redis-backed rate limiting for distributed deployments.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 from functools import wraps
 from sanic.response import json
@@ -38,7 +38,7 @@ class RateLimiter:
         Returns:
             tuple: (allowed: bool, remaining: int, reset_time: datetime)
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(seconds=window_seconds)
         
         # Get request history for this identifier
@@ -136,12 +136,12 @@ def rate_limit(max_requests=100, window_seconds=60, identifier_fn=None):
                 return json({
                     "error": "Rate limit exceeded",
                     "message": f"Maximum {max_requests} requests per {window_seconds} seconds",
-                    "retry_after": int((reset_time - datetime.utcnow()).total_seconds())
+                    "retry_after": int((reset_time - datetime.now(timezone.utc)).total_seconds())
                 }, status=429, headers={
                     "X-RateLimit-Limit": str(max_requests),
                     "X-RateLimit-Remaining": "0",
                     "X-RateLimit-Reset": reset_time.isoformat(),
-                    "Retry-After": str(int((reset_time - datetime.utcnow()).total_seconds()))
+                    "Retry-After": str(int((reset_time - datetime.now(timezone.utc)).total_seconds()))
                 })
             
             # Add rate limit headers to response

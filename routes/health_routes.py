@@ -2,7 +2,7 @@ from sanic import Blueprint
 from sanic.response import json, text
 from models import SessionLocal, Device, AllocationHistory, TestExecution
 from sqlalchemy import func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from prometheus_metrics import format_prometheus_metrics, calculate_utilization
 from openapi_spec import generate_openapi_spec
 
@@ -28,7 +28,7 @@ async def health_check(request):
         
         health_status = {
             "status": "healthy" if db_status == "healthy" else "degraded",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "service": "xts_allocator_server",
             "version": "1.0.0",
             "database": {
@@ -43,7 +43,7 @@ async def health_check(request):
     except Exception as e:
         return json({
             "status": "unhealthy",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "error": str(e)
         }, status=503)
 
@@ -83,7 +83,7 @@ async def get_metrics(request):
             devices_by_rack[f"rack_{rack_id}"] = count
         
         # Allocation metrics for today
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         
         allocations_today = session.query(func.count(AllocationHistory.id)).filter(
             AllocationHistory.start_time >= today_start
@@ -133,7 +133,7 @@ async def get_metrics(request):
         
         # Build metrics dictionary
         metrics_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "total_devices": total_devices,
             "devices_by_state": devices_by_state,
             "devices_by_rack": devices_by_rack,
@@ -213,7 +213,7 @@ async def get_prometheus_metrics(request):
             devices_by_rack[f"rack_{rack_id}"] = count
         
         # Allocation metrics for today
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         
         allocations_today = session.query(func.count(AllocationHistory.id)).filter(
             AllocationHistory.start_time >= today_start
@@ -258,7 +258,7 @@ async def get_prometheus_metrics(request):
         
         # Build metrics dictionary
         metrics_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "total_devices": total_devices,
             "devices_by_state": devices_by_state,
             "devices_by_rack": devices_by_rack,

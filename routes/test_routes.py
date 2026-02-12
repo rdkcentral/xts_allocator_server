@@ -3,10 +3,11 @@ from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory, TestExecution
 from state_machine import DeviceState, transition_device
 from logging_config import get_logger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from rate_limiter import rate_limit, user_email_identifier
 from input_validation import validate_integer, validate_string, validate_email, ValidationError
 from auth import require_auth, ROLE_ENGINEER
+from routes.utils import ensure_utc
 
 test_routes = Blueprint("test_routes")
 logger = get_logger()
@@ -60,17 +61,17 @@ async def start_test(request):
         
         # Check if allocation is still valid (not expired for temporary allocations)
         if device.allocation_type == "temporary" and device.allocation_expiry:
-            if device.allocation_expiry < datetime.utcnow():
+            if ensure_utc(device.allocation_expiry) < datetime.now(timezone.utc):
                 return json({
                     "error": "Allocation has expired, cannot start test"
                 }, status=400)
         
         # Extend allocation if test expected_duration exceeds remaining time
         if expected_duration and device.allocation_type == "temporary" and device.allocation_expiry:
-            remaining_time = (device.allocation_expiry - datetime.utcnow()).total_seconds() / 60
+            remaining_time = (ensure_utc(device.allocation_expiry) - datetime.now(timezone.utc)).total_seconds() / 60
             if expected_duration > remaining_time:
                 # Extend allocation by test duration
-                device.allocation_expiry = datetime.utcnow() + timedelta(minutes=expected_duration + 15)  # +15min buffer
+                device.allocation_expiry = datetime.now(timezone.utc) + timedelta(minutes=expected_duration + 15)  # +15min buffer
                 logger.info(f"Extended allocation for device {device_id} by {expected_duration}min for test")
         
         # Transition device to testing state
@@ -86,8 +87,8 @@ async def start_test(request):
             test_suite=test_suite,
             expected_duration=expected_duration,
             max_duration=data.get("max_duration", 240),  # Default 4 hours
-            start_time=datetime.utcnow(),
-            last_heartbeat=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(timezone.utc),
             heartbeat_timeout=data.get("heartbeat_timeout", 10),  # Default 10 minutes
             test_metadata=data.get("metadata")
         )
@@ -150,11 +151,11 @@ async def test_heartbeat(request):
             return json({"error": "No active test execution found"}, status=404)
         
         # Update heartbeat
-        test_execution.last_heartbeat = datetime.utcnow()
+        test_execution.last_heartbeat = datetime.now(timezone.utc)
         session.commit()
         
         # Calculate time remaining
-        elapsed_minutes = (datetime.utcnow() - test_execution.start_time).total_seconds() / 60
+        elapsed_minutes = (datetime.now(timezone.utc) - ensure_utc(test_execution.start_time)).total_seconds() / 60
         max_remaining = test_execution.max_duration - elapsed_minutes
         
         return json({
@@ -209,14 +210,14 @@ async def end_test(request):
             return json({"error": "No active test execution found"}, status=404)
         
         # Update test execution record
-        test_execution.end_time = datetime.utcnow()
+        test_execution.end_time = datetime.now(timezone.utc)
         test_execution.status = status
         test_execution.exit_code = exit_code
         test_execution.logs_url = logs_url
         test_execution.error_message = error_message
         
         # Calculate test duration
-        test_duration_minutes = (test_execution.end_time - test_execution.start_time).total_seconds() / 60
+        test_duration_minutes = (ensure_utc(test_execution.end_time) - ensure_utc(test_execution.start_time)).total_seconds() / 60
         
         # Update allocation history with test time
         if test_execution.allocation_history_id:
@@ -291,7 +292,7 @@ async def list_test_executions(request):
         for ex in executions:
             duration = None
             if ex.end_time:
-                duration = (ex.end_time - ex.start_time).total_seconds() / 60
+                duration = (ensure_utc(ex.end_time) - ensure_utc(ex.start_time)).total_seconds() / 60
             
             results.append({
                 "id": ex.id,

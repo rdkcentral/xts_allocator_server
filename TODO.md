@@ -1,10 +1,6 @@
 # TODO - Phased Delivery Plan
 
-_Last reviewed: 2026-02-11_
-
-# TODO - Phased Delivery Plan
-
-_Last reviewed: 2026-02-11_
+_Last reviewed: 2026-02-12_
 
 ## Current Focus (Feb 2026)
 
@@ -26,92 +22,56 @@ _Last reviewed: 2026-02-11_
   - Treat rack slot as the platform target consistently across API/docs/export formats
   - Keep aliases (`slot_contents`/`external_equipment`, `labels`/`tags`) documented
 
-- [ ] **Remove `datetime.utcnow()` usage**
-  - Migrate to timezone-aware UTC timestamps to reduce warnings and future break risk
+- [x] **Remove `datetime.utcnow()` usage**
+  - Migrated to `datetime.now(timezone.utc)` across all `.py` files
 
-## Code Review: Outstanding Issues
+## Code Review: Resolved Issues
 
-### Critical: 9 Test Failures (Audit Log Routes)
+### Fixed: 9 Test Failures (Audit Log Routes)
 
-**Root cause:** The 3 route handlers in `audit_log_routes.py` are defined as sync functions, but the `@require_auth` decorator uses `await` to call them.
+- [x] `audit_log_routes.py` — 3 handlers changed from `def` to `async def`
 
-**Error:** `TypeError: object JSONResponse can't be used in 'await' expression`
+### Fixed: Code Quality Issues
 
-**Affected handlers:**
-- [ ] `audit_log_routes.py:17` — `def get_audit_logs` needs `async def`
-- [ ] `audit_log_routes.py:138` — `def get_audit_summary` needs `async def`
-- [ ] `audit_log_routes.py:236` — `def get_event_types` needs `async def`
+- [x] **`build_target_id()` and `normalize_tags()` extracted to `routes/utils.py`**
+  - Removed duplication from 5 route files
 
-### Security Issues (High Priority)
+- [x] **`allocator.xts` is now the canonical XTS config file**
+  - Served from root as `/allocator.xts` (avoids `xts` appearing twice in alias registration)
+  - `config/xts_allocator.xts` is the old path, no longer served
 
-- [ ] **`/allocate_permanent` has no auth or input validation** — `allocation_routes.py:759`
-  - No `@require_auth`, no `validate_user_data`, no `validate_integer` on `slot_id`
-  - Anyone can permanently allocate devices
+- [x] **State machine description added for `TESTING` state** — `state_machine.py`
 
-- [ ] **`/report_status` has no auth** — `allocation_routes.py:834`
-  - Anyone can set device connectivity status, software version, and system_metrics
+### Fixed: Deprecation Warnings
 
-- [ ] **`/allocation_history` has no auth** — `allocation_routes.py:689`
-  - Allocation history (including user emails) is publicly visible
+- [x] **`datetime.utcnow()`** — Migrated all 66 occurrences to `datetime.now(timezone.utc)`
 
-- [ ] **`GET /test_executions` has no auth** — `test_routes.py:259`
-  - Test execution data is publicly accessible
+- [x] **`declarative_base()` import** — `models.py` now uses `from sqlalchemy.orm import declarative_base`
 
-- [ ] **Hardcoded plaintext passwords** — `auth.py:238-254`
-  - `DEMO_USERS` dict with `"password": "admin123"` etc.
-  - Even for dev, this is a risk if deployed
+### Fixed: Minor Issues
 
-- [ ] **`/delete_slot` only requires `ROLE_ENGINEER`** — `device_routes.py:272`
-  - Destructive operation should arguably require `ROLE_ADMIN`
+- [x] **`GET /list_slots` now has rate limiting** — `device_routes.py`
 
-### Code Quality Issues
+## Auth Model (Design Notes)
 
-- [ ] **`build_target_id()` duplicated in 5 route files**
-  - Identical function in: `allocation_routes.py:39`, `device_routes.py:11`, `rack_routes.py:10`, `export_routes.py:10`, `usage_routes.py:12`
-  - Should be extracted to a shared module (e.g., `utils.py` or `helpers.py`)
+Authentication will be based on XTS user settings (email, etc.) transferred to the
+server as first-stage auth. Users who don't provide their identity can't get an
+allocation. Admin features (who can change what) will be configured on the server
+based on user settings or email address. The current `@require_auth` decorator and
+JWT flow serve as the mechanism; endpoints that currently lack `@require_auth` will
+be protected once the XTS client integration is complete.
 
-- [ ] **Orphaned `allocator.xts` file**
-  - `allocator.xts` is a subset copy of `xts_allocator.xts`
-  - Missing: `register`, `whoami`, `tutorial`, `borrow`/`return` commands, `brief`/`alias_name` fields
-  - The served file is `config/xts_allocator.xts`
-  - This orphan will drift out of sync — should be removed or documented
+### Endpoints pending auth integration (by design, not a bug)
 
-- [ ] **State machine description missing `TESTING`** — `state_machine.py:141-151`
-  - `get_state_description()` has no entry for `DeviceState.TESTING`
-  - Returns "Unknown state" for testing devices
+- `/allocate_permanent` — will require auth via XTS user settings
+- `/report_status` — will require device identity
+- `/allocation_history` — will require at least readonly auth
+- `GET /test_executions` — will require at least readonly auth
 
-### Deprecation Warnings (2,381 in test run)
+### Other auth notes
 
-- [ ] **`datetime.utcnow()` — 66 occurrences across 17 files**
-  - Already in your TODO
-  - Python 3.12+ deprecation warning, will break in a future version
-  - Should use `datetime.now(timezone.utc)`
-
-- [ ] **`declarative_base()` from legacy import** — `models.py:2`
-  - `from sqlalchemy.ext.declarative import declarative_base` is deprecated since SQLAlchemy 2.0
-  - Should be `from sqlalchemy.orm import declarative_base`
-
-### Minor / Informational
-
-- [ ] **`GET /list_slots` has no rate limiting** — `device_routes.py:48`
-  - The POST version at line 84 does have it
-
-- [ ] **Synchronous DB sessions in an async framework**
-  - All routes use `SessionLocal()` (synchronous SQLAlchemy)
-  - Blocks Sanic's event loop during DB operations
-  - For production scale this would need async sessions
-
-### Summary
-
-| Category | Count | Severity |
-|----------|-------|----------|
-| Failing tests | 9 | **Critical** (easy fix — add `async`) |
-| Unprotected endpoints | 4 | **High** |
-| Code duplication | 2 | Medium |
-| Deprecation warnings | 2 | Medium (will break eventually) |
-| Minor issues | 3 | Low |
-
-**Highest-impact quick win:** Fix the 3 `def` → `async def` in `audit_log_routes.py` to get all 9 tests passing.
+- Hardcoded `DEMO_USERS` in `auth.py` — placeholder for dev/testing only
+- `/delete_slot` requires `ROLE_ENGINEER` — review whether `ROLE_ADMIN` is more appropriate
 
 ---
 
@@ -260,7 +220,7 @@ _Last reviewed: 2026-02-11_
   - Re-enable 3 skipped federation httpx tests
   - Test with real httpx calls (not mocked)
   - Multi-server federation scenarios
-  - End-to-end workflow tests (allocate→test→deallocate)
+  - End-to-end workflow tests (allocate->test->deallocate)
   - XTS client integration tests
 
 - [ ] **Background task execution tests**
@@ -303,6 +263,15 @@ _Last reviewed: 2026-02-11_
   - Type checking (string vs int vs null)
   - Breaking change detection
   - Backward compatibility testing
+
+---
+
+## Remaining Minor Issues
+
+- [ ] **Synchronous DB sessions in an async framework**
+  - All routes use `SessionLocal()` (synchronous SQLAlchemy)
+  - Blocks Sanic's event loop during DB operations
+  - For production scale this would need async sessions
 
 ---
 

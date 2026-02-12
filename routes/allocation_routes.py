@@ -3,7 +3,7 @@ from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory, Rack
 from state_machine import DeviceState, can_transition, transition_device, get_valid_transitions, is_valid_state
 from logging_config import get_logger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from rate_limiter import rate_limit, user_email_identifier
 from input_validation import validate_user_data, validate_integer, validate_string, ValidationError
 from auth import require_auth, ROLE_ENGINEER, ROLE_ADMIN, get_user_from_request
@@ -36,11 +36,7 @@ def parse_duration(duration_str):
         return None
 
 
-def build_target_id(device):
-    """Build a stable allocation target identifier for a device."""
-    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
-    platform = device.platform or "unknown"
-    return f"{platform}@{rack_name}/{device.slot_name}"
+from routes.utils import build_target_id, ensure_utc
 
 
 def parse_target_id(target_id):
@@ -100,7 +96,7 @@ def allocate_device(session, slot, user, duration_minutes, allocation_expiry):
         user=user.get("username"),
         email=user.get("email"),
         name=user.get("name"),
-        start_time=datetime.utcnow(),
+        start_time=datetime.now(timezone.utc),
         duration_requested=duration_minutes,
         allocation_type="temporary",
         state_before=state_before,
@@ -172,7 +168,7 @@ async def allocate_slot(request):
                 return json({"error": "Invalid duration format. Use '30m', '2h', or '90m'"}, status=400)
             if duration_minutes <= 0 or duration_minutes > 10080:  # Max 1 week
                 return json({"error": "Duration must be between 1 minute and 1 week (10080m)"}, status=400)
-            allocation_expiry = datetime.utcnow() + timedelta(minutes=duration_minutes)
+            allocation_expiry = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
 
         # Allocate by slot_id if provided
         if "id" in slot_params:
@@ -346,10 +342,10 @@ async def deallocate_slot(request):
         
         # Update allocation history record
         if active_history:
-            active_history.end_time = datetime.utcnow()
+            active_history.end_time = datetime.now(timezone.utc)
             active_history.state_after = state_after
             session.commit()
-            logger.info(f"Slot deallocated: device_id={slot_id}, email={user['email']}, history_id={active_history.id}, duration_actual={(active_history.end_time - active_history.start_time).total_seconds() / 60:.1f}m")
+            logger.info(f"Slot deallocated: device_id={slot_id}, email={user['email']}, history_id={active_history.id}, duration_actual={(ensure_utc(active_history.end_time) - ensure_utc(active_history.start_time)).total_seconds() / 60:.1f}m")
         else:
             logger.warning(f"Slot deallocated but no active history found: device_id={slot_id}, email={user['email']}")
         
@@ -433,7 +429,7 @@ async def borrow_slot(request):
         original_allocation_type = slot.allocation_type or "temporary"
         original_expiry = slot.allocation_expiry.isoformat() if slot.allocation_expiry else None
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         borrow_expiry = now + timedelta(minutes=duration_minutes)
 
         # Close current owner's active allocation history record, if present.
@@ -549,7 +545,7 @@ async def return_borrowed_slot(request):
 
         previous_expiry = borrow_meta.get("original_allocation_expiry")
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Close borrower's active history
         borrower_history = session.query(AllocationHistory).filter(
@@ -723,7 +719,7 @@ async def get_allocation_history(request):
         for record in history_records:
             duration_actual = None
             if record.end_time and record.start_time:
-                duration_actual = int((record.end_time - record.start_time).total_seconds() / 60)
+                duration_actual = int((ensure_utc(record.end_time) - ensure_utc(record.start_time)).total_seconds() / 60)
             
             history_list.append({
                 "id": record.id,
@@ -798,7 +794,7 @@ async def allocate_permanent(request):
             user=user.get("username"),
             email=user.get("email"),
             name=user.get("name"),
-            start_time=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
             duration_requested=None,  # No duration for permanent
             allocation_type="permanent",
             state_before=state_before,
@@ -850,7 +846,7 @@ async def report_status(request):
             return json({"error": f"Device {device_id} not found"}, status=404)
         
         # Update status fields
-        device.last_seen = datetime.utcnow()
+        device.last_seen = datetime.now(timezone.utc)
         
         if "connectivity_status" in data:
             device.connectivity_status = data["connectivity_status"]

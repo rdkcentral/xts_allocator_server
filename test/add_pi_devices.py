@@ -6,7 +6,7 @@ These are actual devices on the network (pi5.local and pi4.local)
 that can be used for real testing via SSH.
 """
 from models import SessionLocal, Device, Rack
-from datetime import datetime
+from datetime import datetime, timezone
 
 def add_pi_devices():
     session = SessionLocal()
@@ -52,11 +52,11 @@ def add_pi_devices():
                 
                 # State
                 state="free",
-                state_changed_at=datetime.utcnow(),
+                state_changed_at=datetime.now(timezone.utc),
                 
                 # Connectivity
                 connectivity_status="online",
-                last_seen=datetime.utcnow(),
+                last_seen=datetime.now(timezone.utc),
                 
                 # Allocation type
                 allocation_type="temporary"
@@ -72,7 +72,7 @@ def add_pi_devices():
             }
             pi5.tags = "raspberry-pi,linux,arm64,test-device,local"
             pi5.connectivity_status = "online"
-            pi5.last_seen = datetime.utcnow()
+            pi5.last_seen = datetime.now(timezone.utc)
             # Reset to free state
             pi5.state = "free"
             pi5.owner_email = None
@@ -104,11 +104,11 @@ def add_pi_devices():
                 
                 # State
                 state="free",
-                state_changed_at=datetime.utcnow(),
+                state_changed_at=datetime.now(timezone.utc),
                 
                 # Connectivity
                 connectivity_status="online",
-                last_seen=datetime.utcnow(),
+                last_seen=datetime.now(timezone.utc),
                 
                 # Allocation type
                 allocation_type="temporary"
@@ -124,7 +124,7 @@ def add_pi_devices():
             }
             pi4.tags = "raspberry-pi,linux,arm64,test-device,local"
             pi4.connectivity_status = "online"
-            pi4.last_seen = datetime.utcnow()
+            pi4.last_seen = datetime.now(timezone.utc)
             # Reset to free state
             pi4.state = "free"
             pi4.owner_email = None

@@ -1,8 +1,9 @@
 from sanic import Blueprint
 from sanic.response import json
 from models import SessionLocal, Server, Device
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging_config import get_logger
+from routes.utils import ensure_utc
 import httpx
 
 federation_routes = Blueprint("federation_routes")
@@ -36,7 +37,7 @@ async def register_server(request):
             server.location = location
             server.server_metadata = server_metadata
             server.status = "online"
-            server.last_heartbeat = datetime.utcnow()
+            server.last_heartbeat = datetime.now(timezone.utc)
             logger.info(f"Server updated: {name} at {url}")
         else:
             # Create new server
@@ -46,7 +47,7 @@ async def register_server(request):
                 location=location,
                 role="slave",
                 status="online",
-                last_heartbeat=datetime.utcnow(),
+                last_heartbeat=datetime.now(timezone.utc),
                 server_metadata=server_metadata
             )
             session.add(server)
@@ -92,7 +93,7 @@ async def heartbeat(request):
             return json({"error": f"Server {name} not registered"}, status=404)
         
         # Update heartbeat
-        server.last_heartbeat = datetime.utcnow()
+        server.last_heartbeat = datetime.now(timezone.utc)
         server.device_count = device_count
         server.status = status
         
@@ -131,12 +132,12 @@ async def list_servers(request):
         servers = query.all()
         
         # Mark servers as offline if no heartbeat in last 5 minutes
-        offline_threshold = datetime.utcnow() - timedelta(minutes=5)
+        offline_threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
         
         server_list = []
         for server in servers:
             # Check if server should be marked offline
-            if server.last_heartbeat and server.last_heartbeat < offline_threshold:
+            if server.last_heartbeat and ensure_utc(server.last_heartbeat) < offline_threshold:
                 if server.status != "offline":
                     server.status = "offline"
                     session.commit()

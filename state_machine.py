@@ -4,7 +4,7 @@ State machine for device state transitions.
 Valid states and their transitions for rack-mounted devices.
 """
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class DeviceState(Enum):
@@ -126,7 +126,7 @@ def transition_device(device, new_state: str, session) -> tuple:
     # Perform transition
     old_state = device.state
     device.state = new_state
-    device.state_changed_at = datetime.utcnow()
+    device.state_changed_at = datetime.now(timezone.utc)
     
     # Auto-clear owner on reset/free (but NOT on allocation)
     if new_state in [DeviceState.FREE.value, DeviceState.RESETTING.value]:
@@ -143,6 +143,7 @@ def get_state_description(state: str) -> str:
     descriptions = {
         DeviceState.FREE.value: "Available for allocation",
         DeviceState.ALLOCATED.value: "Allocated to a user",
+        DeviceState.TESTING.value: "Active test execution in progress",
         DeviceState.BUSY.value: "Test running, do not disturb",
         DeviceState.RESETTING.value: "Resetting to clean state",
         DeviceState.MAINTENANCE.value: "Under maintenance, unavailable",
