@@ -3,7 +3,7 @@
 from sanic import Blueprint, json as sanic_json
 from models import SessionLocal, AuditLog
 from sqlalchemy import desc, and_
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging_config import get_logger
 from auth import require_auth, ROLE_ADMIN
 
@@ -14,7 +14,7 @@ audit_log_bp = Blueprint("audit_log", url_prefix="/audit")
 
 @audit_log_bp.route("/logs", methods=["GET"])
 @require_auth(ROLE_ADMIN)
-def get_audit_logs(request):
+async def get_audit_logs(request):
     """Query audit logs with filters (admin only).
     
     Query parameters:
@@ -72,7 +72,7 @@ def get_audit_logs(request):
             try:
                 # Try parsing as minutes ago
                 minutes = int(since)
-                since_time = datetime.utcnow() - timedelta(minutes=minutes)
+                since_time = datetime.now(timezone.utc) - timedelta(minutes=minutes)
             except ValueError:
                 # Parse as ISO timestamp
                 since_time = datetime.fromisoformat(since.replace('Z', '+00:00'))
@@ -135,7 +135,7 @@ def get_audit_logs(request):
 
 @audit_log_bp.route("/summary", methods=["GET"])
 @require_auth(ROLE_ADMIN)
-def get_audit_summary(request):
+async def get_audit_summary(request):
     """Get audit log summary statistics (admin only).
     
     Query parameters:
@@ -150,7 +150,7 @@ def get_audit_summary(request):
         since = request.args.get("since", "1440")  # Default 24 hours
         try:
             minutes = int(since)
-            since_time = datetime.utcnow() - timedelta(minutes=minutes)
+            since_time = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         except ValueError:
             since_time = datetime.fromisoformat(since.replace('Z', '+00:00'))
         
@@ -209,8 +209,8 @@ def get_audit_summary(request):
         return sanic_json({
             "time_range": {
                 "since": since_time.isoformat() + "Z",
-                "until": datetime.utcnow().isoformat() + "Z",
-                "duration_minutes": int((datetime.utcnow() - since_time).total_seconds() / 60)
+                "until": datetime.now(timezone.utc).isoformat() + "Z",
+                "duration_minutes": int((datetime.now(timezone.utc) - since_time).total_seconds() / 60)
             },
             "total_events": base_query.count(),
             "by_event_type": event_type_counts,
@@ -233,7 +233,7 @@ def get_audit_summary(request):
 
 @audit_log_bp.route("/events/types", methods=["GET"])
 @require_auth(ROLE_ADMIN)
-def get_event_types(request):
+async def get_event_types(request):
     """Get list of all event types and categories (admin only)."""
     return sanic_json({
         "event_types": [

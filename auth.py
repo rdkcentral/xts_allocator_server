@@ -5,7 +5,7 @@ Provides token generation, validation, and role-based access control.
 
 import jwt
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from sanic.response import json as sanic_json
 from logging_config import get_logger
@@ -57,14 +57,14 @@ def generate_token(email: str, role: str = ROLE_ENGINEER, token_type: str = "acc
         else timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     )
     
-    expire = datetime.utcnow() + expires_delta
+    expire = datetime.now(timezone.utc) + expires_delta
     
     payload = {
         "email": email,
         "role": role,
         "type": token_type,
         "exp": expire,
-        "iat": datetime.utcnow()
+        "iat": datetime.now(timezone.utc)
     }
     
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)

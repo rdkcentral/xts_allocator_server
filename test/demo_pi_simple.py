@@ -6,7 +6,7 @@ Shows complete allocation lifecycle without API calls.
 
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models import SessionLocal, Device, AllocationHistory, TestExecution
 from state_machine import transition_device, DeviceState
 
@@ -60,7 +60,7 @@ def main():
         # Set allocation details
         pi_device.owner_email = user_email
         pi_device.allocation_type = "temporary"
-        pi_device.allocation_expiry = datetime.utcnow() + timedelta(minutes=duration_minutes)
+        pi_device.allocation_expiry = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
         
         # Create allocation history
         history = AllocationHistory(
@@ -68,7 +68,7 @@ def main():
             email=user_email,
             user="test_engineer",
             name="Test Engineer",
-            start_time=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
             duration_requested=duration_minutes,
             allocation_type="temporary"
         )
@@ -99,11 +99,11 @@ def main():
             allocation_history_id=history.id,
             test_suite="pi_validation_suite",
             test_name="connectivity_and_basic_tests",
-            start_time=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
             expected_duration=5,  # 5 minutes
             max_duration=10,  # 10 minutes
             heartbeat_timeout=2,  # 2 minutes
-            last_heartbeat=datetime.utcnow(),
+            last_heartbeat=datetime.now(timezone.utc),
             status="running"
         )
         session.add(test)
@@ -120,7 +120,7 @@ def main():
         time.sleep(2)
         
         print(f"📡 Heartbeat sent (keeping test alive)")
-        test.last_heartbeat = datetime.utcnow()
+        test.last_heartbeat = datetime.now(timezone.utc)
         session.commit()
         
         time.sleep(1)
@@ -128,7 +128,7 @@ def main():
         # STEP 4: Complete test
         print_header("STEP 4: Complete Test Execution")
         
-        test.end_time = datetime.utcnow()
+        test.end_time = datetime.now(timezone.utc)
         test.status = "passed"
         test.exit_code = 0
         
@@ -167,7 +167,7 @@ def main():
         print_header("STEP 6: Deallocate Device")
         
         # Complete allocation history
-        history.end_time = datetime.utcnow()
+        history.end_time = datetime.now(timezone.utc)
         history.state_after = "free"
         actual_duration = int((history.end_time - history.start_time).total_seconds() / 60)
         

@@ -6,6 +6,7 @@ from models import Base, engine, SessionLocal, Device, Rack, Server, TestExecuti
 from app import app as sanic_app
 from datetime import datetime
 from auth import generate_token, ROLE_ENGINEER, ROLE_ADMIN, ROLE_READONLY
+from rate_limiter import get_rate_limiter
 
 # Ensure tests always use test database
 os.environ['XTS_MODE'] = 'test'
@@ -24,6 +25,9 @@ def setup_database():
 @pytest.fixture(scope="function", autouse=True)
 def clean_database():
     """Clean database before AND after each test to ensure isolation."""
+    # Reset rate limiter between tests
+    get_rate_limiter().reset()
+
     # Clean before test
     session = SessionLocal()
     try:
@@ -38,7 +42,7 @@ def clean_database():
         session.rollback()
     finally:
         session.close()
-    
+
     yield  # Run test
     
     # Clean after test

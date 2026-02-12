@@ -1,19 +1,14 @@
 from sanic import Blueprint
 from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging_config import get_logger
 from sqlalchemy import func
 
+from routes.utils import build_target_id
+
 usage_routes = Blueprint("usage_routes")
 logger = get_logger()
-
-
-def build_target_id(device):
-    """Build a stable allocation target identifier for a device."""
-    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
-    platform = device.platform or "unknown"
-    return f"{platform}@{rack_name}/{device.slot_name}"
 
 
 @usage_routes.get("/device/<device_id:int>/usage_stats")
@@ -113,7 +108,7 @@ async def get_usage_summary(request):
         # Get query parameters
         days = int(request.args.get("days", 30))  # Default last 30 days
         
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         
         # Query allocations in timeframe
         allocations = session.query(AllocationHistory).filter(
@@ -159,7 +154,7 @@ async def get_usage_summary(request):
         summary = {
             "period_days": days,
             "since": since.isoformat() + "Z",
-            "until": datetime.utcnow().isoformat() + "Z",
+            "until": datetime.now(timezone.utc).isoformat() + "Z",
             "statistics": {
                 "total_allocations": total_allocations,
                 "permanent_allocations": permanent_count,

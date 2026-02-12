@@ -60,9 +60,9 @@ class TestTokenVerification:
         """Test verifying expired token."""
         # Create token that expires immediately
         import time
-        from datetime import datetime, timedelta
-        
-        expire = datetime.utcnow() - timedelta(seconds=1)  # Already expired
+        from datetime import datetime, timedelta, timezone
+
+        expire = datetime.now(timezone.utc) - timedelta(seconds=1)  # Already expired
         payload = {
             "email": "user@example.com",
             "role": ROLE_ENGINEER,

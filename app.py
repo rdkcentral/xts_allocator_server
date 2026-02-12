@@ -12,7 +12,7 @@ from routes.audit_log_routes import audit_log_bp
 from models import SessionLocal, Device, TestExecution
 from state_machine import DeviceState, transition_device
 from logging_config import setup_logging, get_logger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import sys
 import signal
@@ -35,7 +35,7 @@ app.blueprint(test_routes)
 app.blueprint(auth_routes)
 app.blueprint(audit_log_bp)
 app.static('/logo.png', './logo.png', name='logo')
-app.static('/xts_allocator.xts', './config/xts_allocator.xts', name='xts_config')
+app.static('/allocator.xts', './allocator.xts', name='xts_config')
 
 # CORS Configuration
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
@@ -74,7 +74,7 @@ async def check_expired_allocations():
             
             session = SessionLocal()
             try:
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 
                 # 1. Check for expired allocations (skip devices in testing state)
                 expired_devices = session.query(Device).filter(

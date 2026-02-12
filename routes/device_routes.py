@@ -5,26 +5,9 @@ from models import SessionLocal, Device, Rack
 from rate_limiter import rate_limit, user_email_identifier
 from auth import require_auth, ROLE_ENGINEER, ROLE_READONLY
 
+from routes.utils import build_target_id, normalize_tags
+
 device_routes = Blueprint("device_routes")
-
-
-def build_target_id(device):
-    """Build a stable allocation target identifier for a device."""
-    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
-    platform = device.platform or "unknown"
-    return f"{platform}@{rack_name}/{device.slot_name}"
-
-
-def normalize_tags(raw_tags):
-    """Normalize tags/labels input to comma-separated lowercase string."""
-    if raw_tags is None:
-        return ""
-    if isinstance(raw_tags, list):
-        items = [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()]
-    else:
-        items = [item.strip().lower() for item in str(raw_tags).split(",") if item.strip()]
-    # Preserve order while removing duplicates.
-    return ",".join(dict.fromkeys(items))
 
 
 def normalize_external_equipment(raw_equipment):
@@ -46,6 +29,7 @@ def normalize_external_equipment(raw_equipment):
 
 
 @device_routes.get("/list_slots")
+@rate_limit(max_requests=60, window_seconds=60)
 async def list_slots(request):
     """Retrieve all available slots from the database."""
     session = SessionLocal()

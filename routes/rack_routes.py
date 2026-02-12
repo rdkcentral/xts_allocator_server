@@ -4,25 +4,9 @@ from sqlalchemy import func, case, or_
 from models import SessionLocal, Rack, Device
 from rate_limiter import rate_limit, user_email_identifier
 
+from routes.utils import build_target_id, normalize_tags
+
 rack_routes = Blueprint("rack_routes")
-
-
-def build_target_id(device):
-    """Build a stable allocation target identifier for a device."""
-    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
-    platform = device.platform or "unknown"
-    return f"{platform}@{rack_name}/{device.slot_name}"
-
-
-def normalize_tags(raw_tags):
-    """Normalize tags/labels input to comma-separated lowercase string."""
-    if raw_tags is None:
-        return ""
-    if isinstance(raw_tags, list):
-        items = [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()]
-    else:
-        items = [item.strip().lower() for item in str(raw_tags).split(",") if item.strip()]
-    return ",".join(dict.fromkeys(items))
 
 
 @rack_routes.get("/list_racks")

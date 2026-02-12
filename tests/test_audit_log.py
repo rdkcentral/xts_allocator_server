@@ -351,7 +351,7 @@ class TestAuditLogIntegration:
             ).count()
             
             # Perform login
-            _, response = test_client.post("/auth/login", json={
+            _, response = test_client.post("/login", json={
                 "email": "admin@example.com",
                 "password": "admin123"
             })
@@ -375,7 +375,7 @@ class TestAuditLogIntegration:
             ).count()
             
             # Attempt bad login
-            _, response = test_client.post("/auth/login", json={
+            _, response = test_client.post("/login", json={
                 "email": "admin@example.com",
                 "password": "wrongpassword"
             })
