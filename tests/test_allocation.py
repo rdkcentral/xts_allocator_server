@@ -26,6 +26,7 @@ class TestAllocation:
         assert response.status == 200
         data = response.json
         assert data["slot_id"] == sample_devices[0].id
+        assert data["target_id"] == "Cisco@TestRack1/Slot1"
         assert data["state"] == "allocated"
         assert data["owner_email"] == "test@example.com"
         assert "allocation_expiry" in data
@@ -46,9 +47,43 @@ class TestAllocation:
         assert response.status == 200
         data = response.json
         assert data["slot_id"] == sample_devices[1].id
+        assert data["target_id"] == "Dell@TestRack2/Slot2"
         assert data["state"] == "allocated"
         assert data["owner_email"] == "user@example.com"
-    
+
+    def test_allocate_by_target_id_slot_match(self, test_client, sample_devices, auth_headers_engineer):
+        """Test allocation by explicit target_id rack/slot."""
+        _, response = test_client.post(
+            "/allocate_slot",
+            json={
+                "user": {"email": "user@example.com"},
+                "slot": {"target_id": "Cisco@TestRack1/Slot1"}
+            },
+            headers=auth_headers_engineer
+        )
+
+        assert response.status == 200
+        data = response.json
+        assert data["slot_id"] == sample_devices[0].id
+        assert data["target_id"] == "Cisco@TestRack1/Slot1"
+        assert data["state"] == "allocated"
+
+    def test_allocate_by_target_id_platform_fallback(self, test_client, sample_devices, auth_headers_engineer):
+        """Test target_id fallback to platform when slot lookup does not match."""
+        _, response = test_client.post(
+            "/allocate_slot",
+            json={
+                "user": {"email": "user@example.com"},
+                "slot": {"target_id": "Dell"}
+            },
+            headers=auth_headers_engineer
+        )
+
+        assert response.status == 200
+        data = response.json
+        assert data["slot_id"] == sample_devices[1].id
+        assert data["target_id"] == "Dell@TestRack2/Slot2"
+
     def test_allocate_by_platform_and_tags(self, test_client, sample_devices, auth_headers_engineer):
         """Test allocation by platform with tag filtering."""
         request, response = test_client.post(
@@ -164,7 +199,7 @@ class TestAllocation:
         )
         
         assert response.status == 400
-        assert "'id' or 'platform' must be provided" in response.json["message"]
+        assert "'id', 'platform', or 'target_id' must be provided" in response.json["message"]
 
 
 class TestDeallocation:
@@ -234,6 +269,108 @@ class TestDeallocation:
         
         assert response.status == 404
         assert "not found" in response.json["message"]
+
+
+class TestBorrowing:
+    """Test borrowing and returning permanently assigned boxes."""
+
+    def test_borrow_and_return_permanent_box_success(self, test_client, sample_devices, auth_headers_engineer):
+        """Borrow a permanently assigned device and return it to original owner."""
+        device_id = sample_devices[0].id
+
+        # Original owner gets a permanent assignment.
+        _, response = test_client.post(
+            "/allocate_permanent",
+            json={
+                "user": {"email": "owner@example.com"},
+                "slot": {"id": device_id}
+            },
+            headers=auth_headers_engineer
+        )
+        assert response.status == 200
+
+        # Borrower temporarily borrows the box.
+        _, response = test_client.post(
+            "/borrow_slot",
+            json={
+                "user": {"email": "borrower@example.com", "name": "Borrow User"},
+                "slot": {"id": device_id},
+                "duration": "2h",
+                "reason": "owner away"
+            },
+            headers=auth_headers_engineer
+        )
+        assert response.status == 200
+        data = response.json
+        assert data["owner_email"] == "borrower@example.com"
+        assert data["borrowed_from_email"] == "owner@example.com"
+        assert data["duration_minutes"] == 120
+
+        # Borrower returns the box to original owner.
+        _, response = test_client.post(
+            "/return_borrowed_slot",
+            json={
+                "user": {"email": "borrower@example.com"},
+                "slot": {"id": device_id}
+            },
+            headers=auth_headers_engineer
+        )
+        assert response.status == 200
+        data = response.json
+        assert data["owner_email"] == "owner@example.com"
+        assert data["allocation_type"] == "permanent"
+
+    def test_borrow_free_slot_rejected(self, test_client, sample_devices, auth_headers_engineer):
+        """Cannot borrow a free slot; must allocate instead."""
+        device_id = sample_devices[0].id
+
+        _, response = test_client.post(
+            "/borrow_slot",
+            json={
+                "user": {"email": "borrower@example.com"},
+                "slot": {"id": device_id},
+                "duration": "1h"
+            },
+            headers=auth_headers_engineer
+        )
+
+        assert response.status == 409
+        assert "is free" in response.json["message"]
+
+    def test_return_borrowed_slot_unauthorized(self, test_client, sample_devices, auth_headers_engineer):
+        """Only current borrower (or admin) can return a borrowed slot."""
+        device_id = sample_devices[0].id
+
+        # Create permanent owner + borrowed state.
+        test_client.post(
+            "/allocate_permanent",
+            json={
+                "user": {"email": "owner@example.com"},
+                "slot": {"id": device_id}
+            },
+            headers=auth_headers_engineer
+        )
+        test_client.post(
+            "/borrow_slot",
+            json={
+                "user": {"email": "borrower@example.com"},
+                "slot": {"id": device_id}
+            },
+            headers=auth_headers_engineer
+        )
+
+        # Different non-admin user attempts return.
+        _, response = test_client.post(
+            "/return_borrowed_slot",
+            json={
+                "user": {"email": "other@example.com"},
+                "slot": {"id": device_id}
+            },
+            headers=auth_headers_engineer
+        )
+
+        assert response.status == 403
+        assert "Only current borrower or admin" in response.json["message"]
 
 
 class TestBackgroundTasks:

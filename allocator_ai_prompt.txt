@@ -1,0 +1,65 @@
+# XTS File Generation Request
+
+## Repository Analysis
+
+**Repository Path:** /home/gweatherup/git/fast/sky/xts_allocator_server
+**Language:** python
+**Build System:** None detected
+**Test Framework:** pytest
+**Package Manager:** None detected
+
+## Detected Commands
+
+### Commands from README
+
+- `./stop.sh         # Gracefully stop running server`
+- `python database_setup.py`
+- `./run.sh test     # Run test suite`
+- `./run.sh clean    # Remove venv and database`
+- `./run.sh`
+- `source env.sh`
+- `./run.sh setup    # Just setup, don't start`
+- `cd xts_allocator_server`
+- `./run.sh          # Full setup and start server (default)`
+- `git clone https://github.com/rdkcentral/xts_allocator_server.git`
+
+## Generation Instructions
+
+Please create an XTS configuration file (.xts) for this repository with the following requirements:
+
+1. **Metadata:**
+   - Add a descriptive `brief` field (one-line summary)
+   - Set `schema_version: "1.0"`
+   - Add appropriate `version` and `changelog`
+
+2. **Commands to include:**
+   - Build command(s)
+   - Test command(s)
+   - Run/start command (if applicable)
+   - Clean/reset command
+   - Any common development workflow commands
+
+3. **Command structure:**
+   - Use clear, descriptive command names
+   - Add helpful descriptions with usage examples
+   - Use `params: passthrough: true` where arguments are needed
+   - Include error handling where appropriate
+
+4. **Functions:**
+   - Add reusable formatter functions if needed (e.g., for JSON output)
+
+5. **Best practices:**
+   - Organize related commands with nesting
+   - Use colored output for better UX
+   - Include validation and error messages
+   - Add `--help` friendly descriptions
+
+## Output Format
+
+Please provide a complete, working .xts file in YAML format that can be used immediately with:
+
+```bash
+xts alias add myproject <generated-file>.xts
+xts myproject <command>
+```
+

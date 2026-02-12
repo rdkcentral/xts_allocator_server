@@ -9,6 +9,13 @@ usage_routes = Blueprint("usage_routes")
 logger = get_logger()
 
 
+def build_target_id(device):
+    """Build a stable allocation target identifier for a device."""
+    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
+    platform = device.platform or "unknown"
+    return f"{platform}@{rack_name}/{device.slot_name}"
+
+
 @usage_routes.get("/device/<device_id:int>/usage_stats")
 async def get_device_usage_stats(request, device_id):
     """
@@ -68,6 +75,7 @@ async def get_device_usage_stats(request, device_id):
             "rack": device.rack.name,
             "slot": device.slot_name,
             "platform": device.platform,
+            "target_id": build_target_id(device),
             "current_state": device.state,
             "current_owner": device.owner_email,
             "allocation_type": device.allocation_type,
@@ -144,6 +152,7 @@ async def get_usage_summary(request):
                     "rack": device.rack.name,
                     "slot": device.slot_name,
                     "platform": device.platform,
+                    "target_id": build_target_id(device),
                     "allocation_count": count
                 })
         

@@ -21,6 +21,7 @@ class TestDeviceListings:
         assert "rackName" in slot
         assert "slotName" in slot
         assert "platform" in slot
+        assert "target_id" in slot
         assert "state" in slot
     
     def test_list_slots_filter_platform(self, test_client, sample_devices):
@@ -46,6 +47,18 @@ class TestDeviceListings:
         slots = response.json["slots"]
         assert len(slots) >= 2
         assert all("network" in slot["tags"] for slot in slots)
+
+    def test_list_slots_filter_labels_alias(self, test_client, sample_devices):
+        """Test filtering slots by labels alias."""
+        request, response = test_client.post(
+            "/list_slots",
+            json={"labels": ["network"]}
+        )
+
+        assert response.status == 200
+        slots = response.json["slots"]
+        assert len(slots) >= 2
+        assert all("network" in slot["labels"] for slot in slots)
 
 
 class TestDeviceCRUD:
@@ -79,6 +92,28 @@ class TestDeviceCRUD:
         
         assert response.status == 400
         assert "Missing required fields" in response.json["error"]
+
+    def test_add_device_with_labels_and_slot_contents(self, test_client, sample_racks, auth_headers_engineer):
+        """Test adding a device using labels + slot_contents aliases."""
+        _, response = test_client.post(
+            "/add_slot",
+            json={
+                "rackName": sample_racks[0].name,
+                "slotName": "FeatureSlot",
+                "platform": "Pi4",
+                "labels": ["camera", "ir", "fan"],
+                "slot_contents": ["pi4", "amp", "fan", "camera", "IR Blaster Ollemxi"]
+            },
+            headers=auth_headers_engineer
+        )
+
+        assert response.status == 201
+        slot_id = response.json["slot_id"]
+
+        _, list_response = test_client.get("/list_slots")
+        created = next(s for s in list_response.json["slots"] if s["slot_id"] == slot_id)
+        assert "camera" in created["labels"]
+        assert any("ollemxi" in str(item).lower() for item in created["slot_contents"])
     
     def test_update_device(self, test_client, sample_devices, auth_headers_engineer):
         """Test updating device information."""
@@ -94,6 +129,24 @@ class TestDeviceCRUD:
         
         assert response.status == 200
         assert "updated successfully" in response.json["message"]
+
+    def test_update_device_labels_and_external_equipment(self, test_client, sample_devices, auth_headers_engineer):
+        """Test updating labels and external equipment metadata."""
+        _, response = test_client.post(
+            "/update_slot",
+            json={
+                "slot_id": sample_devices[0].id,
+                "labels": ["hdmi", "camera"],
+                "external_equipment": [{"type": "camera", "name": "Axis"}]
+            },
+            headers=auth_headers_engineer
+        )
+        assert response.status == 200
+
+        _, list_response = test_client.get("/list_slots")
+        updated = next(s for s in list_response.json["slots"] if s["slot_id"] == sample_devices[0].id)
+        assert "camera" in updated["labels"]
+        assert updated["external_equipment"][0]["type"] == "camera"
     
     def test_update_nonexistent_device(self, test_client, sample_devices, auth_headers_engineer):
         """Test updating non-existent device."""

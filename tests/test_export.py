@@ -106,3 +106,60 @@ class TestConfigExport:
         
         assert response.status == 404
         assert "No allocated devices found" in response.json["error"]
+
+    def test_export_python_raft_device_profile(self, test_client, sample_devices, auth_headers_engineer):
+        """Test exporting platform-centric python_raft device profile."""
+        test_client.post(
+            "/allocate_slot",
+            json={
+                "user": {"email": "test@example.com"},
+                "slot": {"id": sample_devices[0].id}
+            },
+            headers=auth_headers_engineer
+        )
+
+        request, response = test_client.get(
+            f"/export/python_raft_device_profile?allocation_id={sample_devices[0].id}"
+        )
+
+        assert response.status == 200
+        config = yaml.safe_load(response.body)
+        assert config["profile_type"] == "python_raft_device_profile"
+        assert "deviceConfig" in config
+        assert "platformProfiles" in config["deviceConfig"]
+        assert "devices" in config["deviceConfig"]
+
+        cpe_key = next(iter(config["deviceConfig"]["devices"]))
+        platform_key = config["deviceConfig"]["devices"][cpe_key]["platform_profile"]
+        assert platform_key in config["deviceConfig"]["platformProfiles"]
+
+    def test_export_python_raft_rack_config(self, test_client, sample_devices, auth_headers_engineer):
+        """Test exporting rack/slot config with includes and global settings."""
+        test_client.post(
+            "/allocate_slot",
+            json={
+                "user": {"email": "test@example.com"},
+                "slot": {"id": sample_devices[0].id}
+            },
+            headers=auth_headers_engineer
+        )
+
+        request, response = test_client.get(
+            f"/export/python_raft_rack_config?allocation_id={sample_devices[0].id}"
+        )
+
+        assert response.status == 200
+        config = yaml.safe_load(response.body)
+        assert config["profile_type"] == "python_raft_rack_config"
+        assert "globalConfig" in config
+        assert "rackConfig" in config
+        assert "includes" in config["globalConfig"]
+        assert "deviceConfig" in config["globalConfig"]["includes"]
+
+        rack_key = next(iter(config["rackConfig"]))
+        rack_data = config["rackConfig"][rack_key]
+        slot_keys = [k for k in rack_data.keys() if k not in ("name", "description")]
+        assert slot_keys, "Expected at least one slot in rack config"
+        slot_data = rack_data[slot_keys[0]]
+        assert "devices" in slot_data
+        assert "dut" in slot_data["devices"][0]

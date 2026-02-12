@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from rate_limiter import rate_limit, user_email_identifier
 from input_validation import validate_user_data, validate_integer, validate_string, ValidationError
 from auth import require_auth, ROLE_ENGINEER, ROLE_ADMIN, get_user_from_request
+from sqlalchemy import func
 
 allocation_routes = Blueprint("allocation_routes")
 logger = get_logger()
@@ -35,6 +36,104 @@ def parse_duration(duration_str):
         return None
 
 
+def build_target_id(device):
+    """Build a stable allocation target identifier for a device."""
+    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
+    platform = device.platform or "unknown"
+    return f"{platform}@{rack_name}/{device.slot_name}"
+
+
+def parse_target_id(target_id):
+    """
+    Parse target id formats:
+      - platform@rack/slot
+      - rack/slot
+      - platform
+    Returns a dict with optional platform, rack_name, slot_name.
+    """
+    token = (target_id or "").strip()
+    if not token:
+        return {"platform": None, "rack_name": None, "slot_name": None}
+
+    platform = None
+    location = token
+    if "@" in token:
+        left, right = token.split("@", 1)
+        platform = left.strip() or None
+        location = right.strip()
+
+    rack_name = None
+    slot_name = None
+    if "/" in location:
+        rack_name, slot_name = location.split("/", 1)
+        rack_name = rack_name.strip() or None
+        slot_name = slot_name.strip() or None
+    elif not platform:
+        platform = location.strip() or None
+
+    return {
+        "platform": platform,
+        "rack_name": rack_name,
+        "slot_name": slot_name,
+    }
+
+
+def allocate_device(session, slot, user, duration_minutes, allocation_expiry):
+    """Apply allocation state transition, create history, and return response payload."""
+    # Set owner and expiry before allocation
+    slot.owner_email = user.get("email")
+    slot.allocation_type = "temporary"
+    if allocation_expiry:
+        slot.allocation_expiry = allocation_expiry
+
+    # Record state before allocation
+    state_before = slot.state
+
+    # Allocate the slot using state machine
+    success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
+    if not success:
+        return None, json({"message": message}, status=400)
+
+    # Create allocation history record
+    history = AllocationHistory(
+        device_id=slot.id,
+        user=user.get("username"),
+        email=user.get("email"),
+        name=user.get("name"),
+        start_time=datetime.utcnow(),
+        duration_requested=duration_minutes,
+        allocation_type="temporary",
+        state_before=state_before,
+        software_version=slot.software_version
+    )
+    session.add(history)
+    session.commit()
+
+    response = {
+        "message": "Slot allocated successfully",
+        "slot_id": slot.id,
+        "target_id": build_target_id(slot),
+        "rackName": slot.rack.name,
+        "rackId": slot.rack_id,
+        "slotName": slot.slot_name,
+        "state": slot.state,
+        "owner_email": slot.owner_email,
+        "allocation_history_id": history.id
+    }
+    if allocation_expiry:
+        response["allocation_expiry"] = allocation_expiry.isoformat()
+        response["duration_minutes"] = duration_minutes
+
+    return response, None
+
+
+def _normalize_metrics(metrics):
+    """Return mutable dict for device.system_metrics."""
+    if isinstance(metrics, dict):
+        return dict(metrics)
+    return {}
+
+
 @allocation_routes.post("/allocate_slot")
 @require_auth(ROLE_ENGINEER)
 @rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
@@ -54,8 +153,8 @@ async def allocate_slot(request):
         slot_params = data["slot"]
         duration_str = data.get("duration")  # e.g., "2h", "30m", "90m"
 
-        if not slot_params.get("id") and not slot_params.get("platform"):
-            return json({"message": "Either 'id' or 'platform' must be provided"}, status=400)
+        if not slot_params.get("id") and not slot_params.get("platform") and not slot_params.get("target_id"):
+            return json({"message": "Either 'id', 'platform', or 'target_id' must be provided"}, status=400)
         
         # Validate duration string if provided
         if duration_str:
@@ -89,50 +188,78 @@ async def allocate_slot(request):
             if slot.state != DeviceState.FREE.value:
                 return json({"message": f"Slot {slot_id} is not free (current state: {slot.state})"}, status=409)
             
-            # Set owner and expiry before allocation
-            slot.owner_email = user.get("email")
-            slot.allocation_type = "temporary"
-            if allocation_expiry:
-                slot.allocation_expiry = allocation_expiry
-            
-            # Record state before allocation
-            state_before = slot.state
-            
-            # Allocate the slot using state machine
-            success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
-            if not success:
-                return json({"message": message}, status=400)
-            
-            # Create allocation history record
-            history = AllocationHistory(
-                device_id=slot.id,
-                user=user.get("username"),
-                email=user.get("email"),
-                name=user.get("name"),
-                start_time=datetime.utcnow(),
-                duration_requested=duration_minutes,
-                allocation_type="temporary",
-                state_before=state_before,
-                software_version=slot.software_version
+            response, error_response = allocate_device(
+                session=session,
+                slot=slot,
+                user=user,
+                duration_minutes=duration_minutes,
+                allocation_expiry=allocation_expiry
             )
-            session.add(history)
-            session.commit()
+            if error_response:
+                return error_response
             
-            logger.info(f"Slot allocated by ID: device_id={slot.id}, rack={slot.rack.name}, slot={slot.slot_name}, email={user.get('email')}, duration={duration_minutes}m, history_id={history.id}")
-            
-            response = {
-                "message": "Slot allocated successfully",
-                "slot_id": slot.id,
-                "rackName": slot.rack.name,
-                "rackId": slot.rack_id,
-                "slotName": slot.slot_name,
-                "state": slot.state,
-                "owner_email": slot.owner_email,
-                "allocation_history_id": history.id
-            }
-            if allocation_expiry:
-                response["allocation_expiry"] = allocation_expiry.isoformat()
-                response["duration_minutes"] = duration_minutes
+            logger.info(
+                f"Slot allocated by ID: device_id={slot.id}, rack={slot.rack.name}, "
+                f"slot={slot.slot_name}, target_id={build_target_id(slot)}, "
+                f"email={user.get('email')}, duration={duration_minutes}m, "
+                f"history_id={response['allocation_history_id']}"
+            )
+            return json(response, status=200)
+
+        # Allocate by target_id (slot-first, platform fallback)
+        elif "target_id" in slot_params:
+            try:
+                target_id = validate_string(slot_params.get("target_id"), "target_id", max_length=255)
+            except ValidationError as e:
+                return json({"error": str(e)}, status=400)
+
+            parsed = parse_target_id(target_id)
+            platform = parsed.get("platform")
+            rack_name = parsed.get("rack_name")
+            slot_name = parsed.get("slot_name")
+            slot = None
+
+            # 1) Prefer explicit rack/slot match when present.
+            if rack_name and slot_name:
+                query = session.query(Device).join(Rack).filter(
+                    Device.state == DeviceState.FREE.value,
+                    func.lower(Rack.name) == rack_name.lower(),
+                    func.lower(Device.slot_name) == slot_name.lower()
+                )
+                if platform:
+                    query = query.filter(func.lower(Device.platform) == platform.lower())
+                slot = query.first()
+
+            # 2) Fallback to platform allocation if slot lookup misses or target only encodes platform.
+            if not slot and platform:
+                slot = session.query(Device).filter(
+                    Device.state == DeviceState.FREE.value,
+                    func.lower(Device.platform) == platform.lower()
+                ).first()
+
+            if not slot:
+                return json({
+                    "message": "No free slot matches the criteria",
+                    "target_id": target_id,
+                    "slots": []
+                }, status=200)
+
+            response, error_response = allocate_device(
+                session=session,
+                slot=slot,
+                user=user,
+                duration_minutes=duration_minutes,
+                allocation_expiry=allocation_expiry
+            )
+            if error_response:
+                return error_response
+
+            logger.info(
+                f"Slot allocated by target_id: device_id={slot.id}, rack={slot.rack.name}, "
+                f"slot={slot.slot_name}, target_id={build_target_id(slot)}, "
+                f"email={user.get('email')}, duration={duration_minutes}m, "
+                f"history_id={response['allocation_history_id']}"
+            )
             return json(response, status=200)
 
         # Allocate by platform/tags
@@ -145,50 +272,22 @@ async def allocate_slot(request):
             if not slot:
                 return json({"message": "No free slot matches the criteria", "slots":[]}, status=200)
             
-            # Set owner and expiry before allocation
-            slot.owner_email = user.get("email")
-            slot.allocation_type = "temporary"
-            if allocation_expiry:
-                slot.allocation_expiry = allocation_expiry
-            
-            # Record state before allocation
-            state_before = slot.state
-            
-            # Allocate the slot using state machine
-            success, message = transition_device(slot, DeviceState.ALLOCATED.value, session)
-            if not success:
-                return json({"message": message}, status=400)
-            
-            # Create allocation history record
-            history = AllocationHistory(
-                device_id=slot.id,
-                user=user.get("username"),
-                email=user.get("email"),
-                name=user.get("name"),
-                start_time=datetime.utcnow(),
-                duration_requested=duration_minutes,
-                allocation_type="temporary",
-                state_before=state_before,
-                software_version=slot.software_version
+            response, error_response = allocate_device(
+                session=session,
+                slot=slot,
+                user=user,
+                duration_minutes=duration_minutes,
+                allocation_expiry=allocation_expiry
             )
-            session.add(history)
-            session.commit()
+            if error_response:
+                return error_response
             
-            logger.info(f"Slot allocated by platform: device_id={slot.id}, rack={slot.rack.name}, slot={slot.slot_name}, platform={slot.platform}, email={user.get('email')}, duration={duration_minutes}m, history_id={history.id}")
-            
-            response = {
-                "message": "Slot allocated successfully",
-                "slot_id": slot.id,
-                "rackName": slot.rack.name,
-                "rackId": slot.rack_id,
-                "slotName": slot.slot_name,
-                "state": slot.state,
-                "owner_email": slot.owner_email,
-                "allocation_history_id": history.id
-            }
-            if allocation_expiry:
-                response["allocation_expiry"] = allocation_expiry.isoformat()
-                response["duration_minutes"] = duration_minutes
+            logger.info(
+                f"Slot allocated by platform: device_id={slot.id}, rack={slot.rack.name}, "
+                f"slot={slot.slot_name}, target_id={build_target_id(slot)}, "
+                f"platform={slot.platform}, email={user.get('email')}, "
+                f"duration={duration_minutes}m, history_id={response['allocation_history_id']}"
+            )
             return json(response, status=200)
 
     except Exception as e:
@@ -259,6 +358,256 @@ async def deallocate_slot(request):
     except Exception as e:
         session.rollback()
         logger.error(f"Deallocation error: {str(e)}", exc_info=True)
+        return json({"message": "Internal server error", "error": str(e)}, status=500)
+    finally:
+        session.close()
+
+
+@allocation_routes.post("/borrow_slot")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
+async def borrow_slot(request):
+    """
+    Borrow an allocated/permanent device when the current owner is unavailable.
+    Temporarily transfers ownership to borrower and records original owner in metadata.
+    """
+    session = SessionLocal()
+    try:
+        data = request.json
+
+        # Validate user data
+        try:
+            validate_user_data(data.get("user", {}))
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+
+        user = data["user"]
+
+        try:
+            slot_id = validate_integer(data.get("slot", {}).get("id"), "slot_id", min_value=1)
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+
+        duration_str = data.get("duration", "4h")
+        try:
+            duration_str = validate_string(duration_str, "duration", max_length=20, required=False) or "4h"
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+
+        duration_minutes = parse_duration(duration_str)
+        if duration_minutes is None:
+            return json({"error": "Invalid duration format. Use '30m', '2h', or '90m'"}, status=400)
+        if duration_minutes <= 0 or duration_minutes > 10080:
+            return json({"error": "Duration must be between 1 minute and 1 week (10080m)"}, status=400)
+
+        reason = None
+        if "reason" in data:
+            try:
+                reason = validate_string(data.get("reason"), "reason", min_length=1, max_length=200, required=False)
+            except ValidationError as e:
+                return json({"error": str(e)}, status=400)
+
+        slot = session.query(Device).filter(Device.id == slot_id).first()
+        if not slot:
+            return json({"message": f"Slot with id {slot_id} not found"}, status=404)
+
+        if slot.state == DeviceState.FREE.value:
+            return json({"message": f"Slot {slot_id} is free; use allocate command instead"}, status=409)
+        if slot.state == DeviceState.TESTING.value:
+            return json({"message": f"Slot {slot_id} is actively testing and cannot be borrowed"}, status=409)
+        if not slot.owner_email:
+            return json({"message": f"Slot {slot_id} has no current owner and cannot be borrowed"}, status=409)
+        if slot.owner_email == user["email"]:
+            return json({"message": "Borrower already owns this slot"}, status=400)
+
+        metrics = _normalize_metrics(slot.system_metrics)
+        borrow_meta = metrics.get("borrow") if isinstance(metrics.get("borrow"), dict) else None
+        if borrow_meta and borrow_meta.get("active"):
+            return json({
+                "message": f"Slot {slot_id} is already borrowed",
+                "borrowed_by": borrow_meta.get("borrowed_by_email"),
+                "original_owner": borrow_meta.get("original_owner_email")
+            }, status=409)
+
+        original_owner = slot.owner_email
+        original_allocation_type = slot.allocation_type or "temporary"
+        original_expiry = slot.allocation_expiry.isoformat() if slot.allocation_expiry else None
+
+        now = datetime.utcnow()
+        borrow_expiry = now + timedelta(minutes=duration_minutes)
+
+        # Close current owner's active allocation history record, if present.
+        owner_history = session.query(AllocationHistory).filter(
+            AllocationHistory.device_id == slot_id,
+            AllocationHistory.email == original_owner,
+            AllocationHistory.end_time.is_(None)
+        ).order_by(AllocationHistory.start_time.desc()).first()
+        if owner_history:
+            owner_history.end_time = now
+            owner_history.state_after = "borrowed_out"
+
+        # Apply borrow ownership.
+        slot.owner_email = user["email"]
+        slot.allocation_type = "temporary"
+        slot.allocation_expiry = borrow_expiry
+
+        metrics["borrow"] = {
+            "active": True,
+            "original_owner_email": original_owner,
+            "original_allocation_type": original_allocation_type,
+            "original_allocation_expiry": original_expiry,
+            "borrowed_by_email": user["email"],
+            "borrowed_at": now.isoformat(),
+            "reason": reason
+        }
+        slot.system_metrics = metrics
+
+        borrow_history = AllocationHistory(
+            device_id=slot.id,
+            user=user.get("username"),
+            email=user.get("email"),
+            name=user.get("name"),
+            start_time=now,
+            duration_requested=duration_minutes,
+            allocation_type="borrowed",
+            state_before=slot.state,
+            software_version=slot.software_version
+        )
+        session.add(borrow_history)
+        session.commit()
+
+        logger.info(
+            f"Slot borrowed: device_id={slot.id}, borrowed_by={user.get('email')}, "
+            f"original_owner={original_owner}, expires={borrow_expiry.isoformat()}, "
+            f"history_id={borrow_history.id}"
+        )
+
+        return json({
+            "message": "Slot borrowed successfully",
+            "slot_id": slot.id,
+            "target_id": build_target_id(slot),
+            "state": slot.state,
+            "owner_email": slot.owner_email,
+            "borrowed_from_email": original_owner,
+            "borrow_expires": borrow_expiry.isoformat(),
+            "duration_minutes": duration_minutes,
+            "allocation_history_id": borrow_history.id
+        }, status=200)
+
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Borrow slot error: {str(e)}", exc_info=True)
+        return json({"message": "Internal server error", "error": str(e)}, status=500)
+    finally:
+        session.close()
+
+
+@allocation_routes.post("/return_borrowed_slot")
+@require_auth(ROLE_ENGINEER)
+@rate_limit(max_requests=30, window_seconds=60, identifier_fn=user_email_identifier)
+async def return_borrowed_slot(request):
+    """Return a borrowed slot to its original owner."""
+    session = SessionLocal()
+    try:
+        data = request.json
+
+        # Validate user data
+        try:
+            validate_user_data(data.get("user", {}))
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+
+        user = data["user"]
+        requester = get_user_from_request(request) or {}
+        requester_role = requester.get("role")
+
+        try:
+            slot_id = validate_integer(data.get("slot", {}).get("id"), "slot_id", min_value=1)
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
+
+        slot = session.query(Device).filter(Device.id == slot_id).first()
+        if not slot:
+            return json({"message": f"Slot with id {slot_id} not found"}, status=404)
+
+        metrics = _normalize_metrics(slot.system_metrics)
+        borrow_meta = metrics.get("borrow") if isinstance(metrics.get("borrow"), dict) else None
+        if not borrow_meta or not borrow_meta.get("active"):
+            return json({"message": f"Slot {slot_id} is not currently borrowed"}, status=400)
+
+        current_borrower = slot.owner_email
+        if current_borrower != user["email"] and requester_role != ROLE_ADMIN:
+            return json({"message": "Only current borrower or admin can return borrowed slot"}, status=403)
+
+        original_owner = borrow_meta.get("original_owner_email")
+        if not original_owner:
+            return json({"message": "Borrow metadata is incomplete: missing original owner"}, status=500)
+
+        previous_type = borrow_meta.get("original_allocation_type") or "temporary"
+        if previous_type not in {"temporary", "permanent"}:
+            previous_type = "temporary"
+
+        previous_expiry = borrow_meta.get("original_allocation_expiry")
+
+        now = datetime.utcnow()
+
+        # Close borrower's active history
+        borrower_history = session.query(AllocationHistory).filter(
+            AllocationHistory.device_id == slot_id,
+            AllocationHistory.email == current_borrower,
+            AllocationHistory.end_time.is_(None)
+        ).order_by(AllocationHistory.start_time.desc()).first()
+        if borrower_history:
+            borrower_history.end_time = now
+            borrower_history.state_after = "returned"
+
+        # Restore original ownership
+        slot.owner_email = original_owner
+        slot.allocation_type = previous_type
+        if previous_type == "temporary" and previous_expiry:
+            try:
+                slot.allocation_expiry = datetime.fromisoformat(previous_expiry)
+            except ValueError:
+                slot.allocation_expiry = None
+        else:
+            slot.allocation_expiry = None
+
+        metrics.pop("borrow", None)
+        slot.system_metrics = metrics if metrics else None
+
+        restored_history = AllocationHistory(
+            device_id=slot.id,
+            user=original_owner.split("@")[0] if "@" in original_owner else original_owner,
+            email=original_owner,
+            name=None,
+            start_time=now,
+            duration_requested=None,
+            allocation_type=slot.allocation_type,
+            state_before=slot.state,
+            software_version=slot.software_version
+        )
+        session.add(restored_history)
+        session.commit()
+
+        logger.info(
+            f"Borrow returned: device_id={slot.id}, returned_by={user.get('email')}, "
+            f"restored_owner={original_owner}, history_id={restored_history.id}"
+        )
+
+        return json({
+            "message": "Borrowed slot returned successfully",
+            "slot_id": slot.id,
+            "target_id": build_target_id(slot),
+            "state": slot.state,
+            "owner_email": slot.owner_email,
+            "allocation_type": slot.allocation_type,
+            "allocation_expiry": slot.allocation_expiry.isoformat() if slot.allocation_expiry else None,
+            "allocation_history_id": restored_history.id
+        }, status=200)
+
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Return borrowed slot error: {str(e)}", exc_info=True)
         return json({"message": "Internal server error", "error": str(e)}, status=500)
     finally:
         session.close()
@@ -379,6 +728,7 @@ async def get_allocation_history(request):
             history_list.append({
                 "id": record.id,
                 "device_id": record.device_id,
+                "target_id": build_target_id(record.device),
                 "device_name": f"{record.device.rack.name}_{record.device.slot_name}",
                 "platform": record.device.platform,
                 "user": record.user,
@@ -462,6 +812,7 @@ async def allocate_permanent(request):
         response = {
             "message": "Slot allocated permanently",
             "slot_id": slot.id,
+            "target_id": build_target_id(slot),
             "rackName": slot.rack.name,
             "rackId": slot.rack_id,
             "slotName": slot.slot_name,

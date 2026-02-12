@@ -1,11 +1,49 @@
 from sanic import Blueprint
 from sanic.response import json
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from models import SessionLocal, Device, Rack
 from rate_limiter import rate_limit, user_email_identifier
 from auth import require_auth, ROLE_ENGINEER, ROLE_READONLY
 
 device_routes = Blueprint("device_routes")
+
+
+def build_target_id(device):
+    """Build a stable allocation target identifier for a device."""
+    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
+    platform = device.platform or "unknown"
+    return f"{platform}@{rack_name}/{device.slot_name}"
+
+
+def normalize_tags(raw_tags):
+    """Normalize tags/labels input to comma-separated lowercase string."""
+    if raw_tags is None:
+        return ""
+    if isinstance(raw_tags, list):
+        items = [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()]
+    else:
+        items = [item.strip().lower() for item in str(raw_tags).split(",") if item.strip()]
+    # Preserve order while removing duplicates.
+    return ",".join(dict.fromkeys(items))
+
+
+def normalize_external_equipment(raw_equipment):
+    """Normalize slot contents to list[dict] for external_equipment storage."""
+    if raw_equipment is None:
+        return []
+    if isinstance(raw_equipment, str):
+        raw_equipment = [item.strip() for item in raw_equipment.split(",") if item.strip()]
+    if not isinstance(raw_equipment, list):
+        return []
+
+    normalized = []
+    for item in raw_equipment:
+        if isinstance(item, dict):
+            normalized.append(item)
+        elif isinstance(item, str) and item.strip():
+            normalized.append({"type": item.strip().lower(), "name": item.strip()})
+    return normalized
+
 
 @device_routes.get("/list_slots")
 async def list_slots(request):
@@ -23,8 +61,10 @@ async def list_slots(request):
                 "rackBuilding": slot.rack.building,
                 "slotName": slot.slot_name,
                 "platform": slot.platform,
+                "target_id": build_target_id(slot),
                 "description": slot.description,
                 "tags": slot.tags.split(",") if slot.tags else [],
+                "labels": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
                 "owner_email": slot.owner_email,
                 "allocation_type": slot.allocation_type,
@@ -32,6 +72,7 @@ async def list_slots(request):
                 "make": slot.make,
                 "model": slot.model,
                 "external_equipment": slot.external_equipment or [],
+                "slot_contents": slot.external_equipment or [],
             }
             for slot in slots
         ]
@@ -46,16 +87,53 @@ async def list_slots_filters(request):
     """Retrieve slots from the database based on specific filter criteria."""
     session = SessionLocal()
     try:
-        criteria = request.json
-        query = session.query(Device)
+        criteria = request.json or {}
+        query = session.query(Device).join(Rack)
 
         if "platform" in criteria:
             query = query.filter(Device.platform == criteria["platform"])
         if "description" in criteria:
             query = query.filter(Device.description.like(f"%{criteria['description']}%"))
-        if "tags" in criteria:
-            tags = ",".join(criteria["tags"])
+        if "tags" in criteria or "labels" in criteria:
+            tags = normalize_tags(criteria.get("tags", criteria.get("labels")))
             query = query.filter(Device.tags.contains(tags))
+        if "rackName" in criteria:
+            query = query.filter(Rack.name == criteria["rackName"])
+        if "state" in criteria:
+            query = query.filter(Device.state == criteria["state"])
+        if "owner_email" in criteria:
+            query = query.filter(Device.owner_email == criteria["owner_email"])
+        if "query" in criteria and str(criteria["query"]).strip():
+            q = str(criteria["query"]).strip().lower()
+            pattern = f"%{q}%"
+            query = query.filter(
+                or_(
+                    func.lower(Device.platform).like(pattern),
+                    func.lower(Device.slot_name).like(pattern),
+                    func.lower(Device.description).like(pattern),
+                    func.lower(Device.make).like(pattern),
+                    func.lower(Device.model).like(pattern),
+                    func.lower(Device.tags).like(pattern),
+                    func.lower(Rack.name).like(pattern)
+                )
+            )
+
+        devices = query.all()
+
+        target_filter = str(criteria.get("target_id", "")).strip().lower()
+        if target_filter:
+            devices = [d for d in devices if target_filter in build_target_id(d).lower()]
+
+        equipment_filter = str(criteria.get("has_equipment_type", criteria.get("has_equipment", ""))).strip().lower()
+        if equipment_filter:
+            devices = [
+                d for d in devices
+                if any(
+                    equipment_filter in str(eq.get("type", "")).lower()
+                    or equipment_filter in str(eq.get("name", "")).lower()
+                    for eq in (d.external_equipment or [])
+                )
+            ]
 
         matching_slots = [
             {
@@ -64,13 +142,17 @@ async def list_slots_filters(request):
                 "rackId": slot.rack_id,
                 "slotName": slot.slot_name,
                 "platform": slot.platform,
+                "target_id": build_target_id(slot),
                 "description": slot.description,
                 "tags": slot.tags.split(",") if slot.tags else [],
+                "labels": slot.tags.split(",") if slot.tags else [],
                 "state": slot.state,
                 "owner_email": slot.owner_email,
-                "allocation_expiry": slot.allocation_expiry.isoformat() if slot.allocation_expiry else None
+                "allocation_expiry": slot.allocation_expiry.isoformat() if slot.allocation_expiry else None,
+                "external_equipment": slot.external_equipment or [],
+                "slot_contents": slot.external_equipment or []
             }
-            for slot in query.all()
+            for slot in devices
         ]
         return json({"slots": matching_slots}, status=200)
     finally:
@@ -93,7 +175,21 @@ def update_slot_fields(slot, data, session):
     if "description" in data:
         slot.description = data["description"]
     if "tags" in data:
-        slot.tags = ",".join(data["tags"]) if isinstance(data["tags"], list) else data["tags"]
+        slot.tags = normalize_tags(data["tags"])
+    if "labels" in data and "tags" not in data:
+        slot.tags = normalize_tags(data["labels"])
+    if "make" in data:
+        slot.make = data["make"]
+    if "model" in data:
+        slot.model = data["model"]
+    if "host_ipv4" in data:
+        slot.host_ipv4 = data["host_ipv4"]
+    if "control_uris" in data:
+        slot.control_uris = data["control_uris"]
+    if "external_equipment" in data:
+        slot.external_equipment = normalize_external_equipment(data["external_equipment"])
+    if "slot_contents" in data and "external_equipment" not in data:
+        slot.external_equipment = normalize_external_equipment(data["slot_contents"])
 
 @device_routes.post("/add_slot")
 @require_auth(ROLE_ENGINEER)
@@ -119,9 +215,16 @@ async def add_slot(request):
             slot_name=data["slotName"],
             platform=data.get("platform", ""), 
             description=data.get("description", ""), 
-            tags=",".join(data["tags"]) if "tags" in data and isinstance(data["tags"], list) else data.get("tags", ""), 
+            tags=normalize_tags(data.get("tags", data.get("labels", ""))),
             state=data.get("state", "free"),
-            owner_email=data.get("owner_email")
+            owner_email=data.get("owner_email"),
+            make=data.get("make"),
+            model=data.get("model"),
+            host_ipv4=data.get("host_ipv4"),
+            control_uris=data.get("control_uris"),
+            external_equipment=normalize_external_equipment(
+                data.get("external_equipment", data.get("slot_contents"))
+            )
         )
             
         session.add(new_slot)

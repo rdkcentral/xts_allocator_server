@@ -1,10 +1,29 @@
 from sanic import Blueprint
 from sanic.response import json
-from sqlalchemy import func, case
+from sqlalchemy import func, case, or_
 from models import SessionLocal, Rack, Device
 from rate_limiter import rate_limit, user_email_identifier
 
 rack_routes = Blueprint("rack_routes")
+
+
+def build_target_id(device):
+    """Build a stable allocation target identifier for a device."""
+    rack_name = device.rack.name if device.rack else f"rack-{device.rack_id}"
+    platform = device.platform or "unknown"
+    return f"{platform}@{rack_name}/{device.slot_name}"
+
+
+def normalize_tags(raw_tags):
+    """Normalize tags/labels input to comma-separated lowercase string."""
+    if raw_tags is None:
+        return ""
+    if isinstance(raw_tags, list):
+        items = [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()]
+    else:
+        items = [item.strip().lower() for item in str(raw_tags).split(",") if item.strip()]
+    return ",".join(dict.fromkeys(items))
+
 
 @rack_routes.get("/list_racks")
 async def list_racks(request):
@@ -56,14 +75,17 @@ async def get_rack(request, rack_id):
                 "id": device.id,
                 "slot_name": device.slot_name,
                 "platform": device.platform,
+                "target_id": build_target_id(device),
                 "description": device.description,
                 "state": device.state,
                 "owner_email": device.owner_email,
                 "tags": device.tags.split(",") if device.tags else [],
+                "labels": device.tags.split(",") if device.tags else [],
                 "make": device.make,
                 "model": device.model,
                 "serial_number": device.serial_number,
-                "external_equipment": device.external_equipment or []
+                "external_equipment": device.external_equipment or [],
+                "slot_contents": device.external_equipment or []
             }
             for device in devices
         ]
@@ -100,16 +122,19 @@ async def get_rack_devices(request, rack_id):
                 "id": device.id,
                 "slot_name": device.slot_name,
                 "platform": device.platform,
+                "target_id": build_target_id(device),
                 "description": device.description,
                 "state": device.state,
                 "owner_email": device.owner_email,
                 "tags": device.tags.split(",") if device.tags else [],
+                "labels": device.tags.split(",") if device.tags else [],
                 "make": device.make,
                 "model": device.model,
                 "serial_number": device.serial_number,
                 "host_ipv4": device.host_ipv4,
                 "control_uris": device.control_uris or {},
-                "external_equipment": device.external_equipment or []
+                "external_equipment": device.external_equipment or [],
+                "slot_contents": device.external_equipment or []
             }
             for device in devices
         ]
@@ -150,27 +175,48 @@ async def search_devices(request):
             query = query.filter(Device.state == filters["state"])
         
         # Filter by tags
-        if "tags" in filters:
-            tags = ",".join(filters["tags"]) if isinstance(filters["tags"], list) else filters["tags"]
+        if "tags" in filters or "labels" in filters:
+            tags = normalize_tags(filters.get("tags", filters.get("labels")))
             query = query.filter(Device.tags.contains(tags))
+
+        # Filter by free-text query across common box identity fields
+        if "query" in filters and str(filters["query"]).strip():
+            q = str(filters["query"]).strip().lower()
+            pattern = f"%{q}%"
+            query = query.join(Rack).filter(
+                or_(
+                    func.lower(Device.platform).like(pattern),
+                    func.lower(Device.slot_name).like(pattern),
+                    func.lower(Device.description).like(pattern),
+                    func.lower(Device.make).like(pattern),
+                    func.lower(Device.model).like(pattern),
+                    func.lower(Device.tags).like(pattern),
+                    func.lower(Rack.name).like(pattern)
+                )
+            )
         
         # Filter by owner
         if "owner_email" in filters:
             query = query.filter(Device.owner_email == filters["owner_email"])
         
-        # Filter by external equipment type
-        if "has_equipment_type" in filters:
-            # This requires JSON querying - simplified version
-            equipment_type = filters["has_equipment_type"]
-            devices = []
-            for device in query.all():
-                if device.external_equipment:
-                    for eq in device.external_equipment:
-                        if eq.get("type") == equipment_type:
-                            devices.append(device)
-                            break
-        else:
-            devices = query.all()
+        devices = query.all()
+
+        # Filter by computed target id (exact or partial)
+        target_filter = str(filters.get("target_id", "")).strip().lower()
+        if target_filter:
+            devices = [d for d in devices if target_filter in build_target_id(d).lower()]
+
+        # Filter by external equipment type/name
+        equipment_type = str(filters.get("has_equipment_type", filters.get("has_equipment", ""))).strip().lower()
+        if equipment_type:
+            devices = [
+                d for d in devices
+                if any(
+                    equipment_type in str(eq.get("type", "")).lower()
+                    or equipment_type in str(eq.get("name", "")).lower()
+                    for eq in (d.external_equipment or [])
+                )
+            ]
         
         devices_list = [
             {
@@ -179,16 +225,19 @@ async def search_devices(request):
                 "rack_name": device.rack.name,
                 "slot_name": device.slot_name,
                 "platform": device.platform,
+                "target_id": build_target_id(device),
                 "description": device.description,
                 "state": device.state,
                 "owner_email": device.owner_email,
                 "tags": device.tags.split(",") if device.tags else [],
+                "labels": device.tags.split(",") if device.tags else [],
                 "make": device.make,
                 "model": device.model,
                 "serial_number": device.serial_number,
                 "host_ipv4": device.host_ipv4,
                 "control_uris": device.control_uris or {},
-                "external_equipment": device.external_equipment or []
+                "external_equipment": device.external_equipment or [],
+                "slot_contents": device.external_equipment or []
             }
             for device in devices
         ]

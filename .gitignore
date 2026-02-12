@@ -1,3 +1,4 @@
+bin
 *.lastlogin
 *__pycache__*
 *.vscode*

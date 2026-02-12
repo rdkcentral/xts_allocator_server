@@ -307,6 +307,114 @@ def generate_openapi_spec() -> Dict[str, Any]:
             }
         }
     }
+
+    spec["paths"]["/export/python_raft_config"] = {
+        "get": {
+            "tags": ["Export"],
+            "summary": "Export legacy python_raft combined config",
+            "description": "Generate combined rack/device config structure for python_raft compatibility",
+            "parameters": [
+                {
+                    "name": "allocation_id",
+                    "in": "query",
+                    "description": "Allocated device ID",
+                    "schema": {"type": "integer"}
+                },
+                {
+                    "name": "owner_email",
+                    "in": "query",
+                    "description": "Filter by allocation owner email",
+                    "schema": {"type": "string", "format": "email"}
+                }
+            ],
+            "responses": {
+                "200": {
+                    "description": "YAML configuration",
+                    "content": {
+                        "application/x-yaml": {
+                            "schema": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    spec["paths"]["/export/python_raft_device_profile"] = {
+        "get": {
+            "tags": ["Export"],
+            "summary": "Export platform-centric device profile",
+            "description": "Generate a deviceConfig profile with shared platform settings and device references",
+            "parameters": [
+                {
+                    "name": "allocation_id",
+                    "in": "query",
+                    "description": "Allocated device ID",
+                    "schema": {"type": "integer"}
+                },
+                {
+                    "name": "owner_email",
+                    "in": "query",
+                    "description": "Filter by allocation owner email",
+                    "schema": {"type": "string", "format": "email"}
+                },
+                {
+                    "name": "platform",
+                    "in": "query",
+                    "description": "Optional platform filter",
+                    "schema": {"type": "string"}
+                }
+            ],
+            "responses": {
+                "200": {
+                    "description": "YAML configuration",
+                    "content": {
+                        "application/x-yaml": {
+                            "schema": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    spec["paths"]["/export/python_raft_rack_config"] = {
+        "get": {
+            "tags": ["Export"],
+            "summary": "Export rack/slot RAFT config",
+            "description": "Generate globalConfig and rackConfig data for python_raft rack/slot topology",
+            "parameters": [
+                {
+                    "name": "allocation_id",
+                    "in": "query",
+                    "description": "Allocated device ID",
+                    "schema": {"type": "integer"}
+                },
+                {
+                    "name": "owner_email",
+                    "in": "query",
+                    "description": "Filter by allocation owner email",
+                    "schema": {"type": "string", "format": "email"}
+                },
+                {
+                    "name": "device_config_include",
+                    "in": "query",
+                    "description": "Path to device config include file",
+                    "schema": {"type": "string"}
+                }
+            ],
+            "responses": {
+                "200": {
+                    "description": "YAML configuration",
+                    "content": {
+                        "application/x-yaml": {
+                            "schema": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     # Components (schemas)
     spec["components"] = {

@@ -171,11 +171,13 @@ class TestingConfig(Config):
 
 def get_config():
     """Get configuration based on environment."""
-    env = os.environ.get("XTS_ENV", "development").lower()
+    # Prefer XTS_MODE (used by scripts/docs), fall back to legacy XTS_ENV.
+    env = os.environ.get("XTS_MODE") or os.environ.get("XTS_ENV", "development")
+    env = env.lower()
     
     if env == "production":
         return ProductionConfig
-    elif env == "testing":
+    elif env in ("testing", "test"):
         return TestingConfig
     else:
         return DevelopmentConfig
@@ -186,4 +188,3 @@ config = get_config()
 
 # Set legacy DATABASE_URL for backward compatibility
 Config.DATABASE_URL = config.get_database_url()
-

@@ -1,152 +1,117 @@
 # TODO - Phased Delivery Plan
 
-## Phase 1: Core MVP - Command Line Ready (PRIORITY)
+_Last reviewed: 2026-02-11_
 
-**Goal: Get operational ASAP with full CLI functionality**
+# TODO - Phased Delivery Plan
 
-- [x] **Add rack/equipment search and listing endpoints**
-  - `/list_racks` - all racks with device counts ✓
-  - `/rack/{id}/devices` - all devices in rack with status ✓
-  - `/devices/search` - filter by: rack, platform, tags, state, has_equipment_type ✓
-  - Update `/list_slots` to include rack info and external equipment ✓
+_Last reviewed: 2026-02-11_
 
-- [x] **Implement proper state machine (5+ states)**
-  - Expand Device state from free/allocated to: free, allocated, busy, resetting, maintenance, offline ✓
-  - Add state transition validation ✓
-  - Track state_changed_at timestamp ✓
+## Current Focus (Feb 2026)
 
-- [x] **Implement duration-based allocation with expiry**
-  - Add duration to allocation request (minutes/hours), calculate expiry ✓
-  - Create Sanic background task to check expired allocations every N minutes ✓
-  - Auto-deallocate and trigger state change to 'resetting' ✓
+**Purpose: keep the short list of items that still block daily engineering workflows**
 
-- [x] **Create .xts command definition file and serve it**
-  - Build `xts_allocator.xts` file with YAML command definitions for XTS tool integration ✓
-  - Add server endpoint to serve the .xts file (e.g., `/xts_allocator.xts`) ✓
-  - Users can run: `xts alias http://<server>/xts_allocator.xts` to access commands remotely ✓
-  - **XTS orchestration commands** (E2E testing workflow):
-    - `xts allocate` - allocate device, receive config, save locally for raft ✓
-    - `xts list` - list available test suites/devices ✓
-    - `xts deallocate` - cleanup after tests complete ✓
-  - Commands use curl to interact with REST API endpoints ✓
-  - Include passthrough params for dynamic arguments (email, duration, filters) ✓
-  - Allows central management and evolution of commands over time ✓
-  - **Goal**: Single unified tool (XTS) for engineers to control entire test lifecycle ✓
+- [ ] **Add pagination/sorting for large fleets (100+ boxes)**
+  - Add `limit`, `offset`, and stable sort options to `/list_slots` and `/devices/search`
+  - Ensure CLI defaults remain concise while still allowing full exports
 
-- [x] **Design and implement allocator-driven configuration for python_raft**
-  - **Integration architecture**: XTS orchestrates allocator server + python_raft ✓
-    - XTS calls allocator server → receives config → saves locally → invokes raft ✓
-    - XTS is the unified interface for engineers to run entire E2E test workflow ✓
-  - **Server endpoints:** ✓
-    - `/export/raft_config` - return allocator-optimized YAML config (new format) ✓
-    - `/export/python_raft_config` - python_raft-compatible manual format (existing rack_config + device_config schema) ✓
-    - Config includes allocation_id for reference ✓
-  - **New allocator-driven config format** (optimized for XTS allocator integration): ✓
-    - Include server communication metadata (allocator_url, allocation_id) ✓
-    - Unified config structure combining device + rack info in single file ✓
-    - Support dynamic/allocated devices vs static rack definitions ✓
-    - Store allocation context (duration, expiry, owner_email) for reference ✓
-  - **Manual config format** (python_raft-compatible): ✓
-    - Follows existing rack_config.yml + device_config.yml structure ✓
-    - Used by python_raft for manually-defined test environments ✓
-    - Allocator generates this format from current device allocation ✓
-    - Maintains compatibility with existing python_raft workflows ✓
-  - **Config storage and usage:** ✓
-    - XTS saves config locally when received from allocator ✓
-    - XTS passes config path to raft when invoking tests ✓
-    - Raft loads config for device connection details ✓
-  - **Benefits of allocator-driven format:** ✓
-    - Not constrained by manual schema limitations ✓
-    - Optimized for allocation workflow (XTS → allocator → raft) ✓
-    - Can evolve independently while maintaining backward compatibility ✓
-    - Simplifies E2E testing: engineers use XTS commands, everything else is automated ✓
+- [ ] **Add compact box status endpoint for RAFT/XTS polling**
+  - Include state, active test name/id, elapsed duration, and heartbeat age
+  - Keep payload lightweight for frequent polling from automation
 
-- [x] **Implement AllocationHistory audit trail**
-  - Populate AllocationHistory on allocate/deallocate ✓
-  - Track: user_email, device_id, start_time, end_time, duration_requested, software_version, state_before/after ✓
-  - Add `GET /allocation_history` endpoint with filters ✓
+- [ ] **Finish XTS core integration items (cross-repo)**
+  - Complete allocator command execution path in xts_core
+  - Support internal shallow clone for remote-repo analysis
 
-- [x] **Add structured logging framework**
-  - Python logging module with INFO/ERROR levels ✓
-  - Log: allocation/deallocation, state transitions, errors, API requests ✓
-  - File handler with rotation (RotatingFileHandler), console handler for dev ✓
+- [ ] **Align terminology and schema expectations**
+  - Treat rack slot as the platform target consistently across API/docs/export formats
+  - Keep aliases (`slot_contents`/`external_equipment`, `labels`/`tags`) documented
 
-- [x] **Create health check and metrics endpoints**
-  - `/health` - status, database connectivity, timestamp ✓
-  - `/metrics` - total_devices, devices_by_state, devices_by_rack, allocations_today, avg_allocation_duration ✓
+- [ ] **Remove `datetime.utcnow()` usage**
+  - Migrate to timezone-aware UTC timestamps to reduce warnings and future break risk
 
-- [x] **Build comprehensive test suite**
-  - Allocate by ID/platform/tags ✓
-  - Deallocate (success/403/404) ✓
-  - Duration expiry ✓
-  - Rack listings, equipment search, state transitions ✓
-  - CRUD operations, concurrent allocation attempts ✓
-  - Invalid inputs, edge cases ✓
+## Code Review: Outstanding Issues
 
----
+### Critical: 9 Test Failures (Audit Log Routes)
 
-## Phase 2: Enhanced Features & UI
+**Root cause:** The 3 route handlers in `audit_log_routes.py` are defined as sync functions, but the `@require_auth` decorator uses `await` to call them.
 
-**Goal: Add web interface and advanced capabilities**
+**Error:** `TypeError: object JSONResponse can't be used in 'await' expression`
 
-- [x] **Build Flutter web monitoring dashboard**
-  - Web interface for device allocation and management ✓ (HTML implementation)
-  - Features: view device status, filter/search devices ✓
-  - Real-time device state visualization ✓
-  - User-friendly interface for non-CLI users ✓
-  - Device grid view, search/filter, state-based color coding ✓
-  - Note: Implemented as responsive HTML/CSS/JS dashboard at /dashboard
-  - Future: Can enhance to full Flutter web app with inline allocation/deallocation
+**Affected handlers:**
+- [ ] `audit_log_routes.py:17` — `def get_audit_logs` needs `async def`
+- [ ] `audit_log_routes.py:138` — `def get_audit_summary` needs `async def`
+- [ ] `audit_log_routes.py:236` — `def get_event_types` needs `async def`
 
-- [x] **Support permanent allocations and device status tracking**
-  - Add allocation_type field: "temporary" (with expiry) vs "permanent" (no expiry) ✓
-  - Endpoint: `/allocate_permanent` - assign device to user indefinitely ✓
-  - Permanent allocations: no expiry, owner retains device until explicit deallocation ✓
-  - **Use case: Engineer desk boxes** - permanently allocated devices on engineer desks ✓
-  - **Live device status tracking**: ✓
-    - XTS reporting: `/report_status` endpoint - XTS reports status during execution ✓
-    - Track last_seen timestamp, connectivity status, software version, system_metrics ✓
-    - Server-side polling: background task (future enhancement for automated health checks)
-  - Usage statistics: ✓
-    - Track test execution count, total test time, idle time percentage ✓
-    - API endpoints: `/device/{id}/usage_stats` - per-device statistics ✓
-    - `/usage_summary` - system-wide aggregates and reports ✓
-    - Top devices by usage, unique users, allocation trends ✓
+### Security Issues (High Priority)
 
-- [x] **Implement federated multi-server architecture**
-- [x] **Implement federated multi-server architecture**
-  - Support multiple XTS allocator servers (per office/floor/group/cluster) ✓
-  - Master server registry: tracks all slave servers (URL, location, status, device count) ✓
-  - Slave server registration: POST to master on startup with server metadata ✓
-  - Health monitoring: periodic heartbeat from slaves, mark servers offline/online ✓
-  - Cross-server device discovery: master aggregates device listings from all slaves ✓
-  - Resilience: slaves operate independently, master handles offline/unreachable servers ✓
-  - API endpoints: `/servers`, `/servers/{id}/devices`, `/register`, `/heartbeat`, `/devices/federated` ✓
+- [ ] **`/allocate_permanent` has no auth or input validation** — `allocation_routes.py:759`
+  - No `@require_auth`, no `validate_user_data`, no `validate_integer` on `slot_id`
+  - Anyone can permanently allocate devices
 
----
+- [ ] **`/report_status` has no auth** — `allocation_routes.py:834`
+  - Anyone can set device connectivity status, software version, and system_metrics
 
-## Phase 3: Advanced Test Integration
+- [ ] **`/allocation_history` has no auth** — `allocation_routes.py:689`
+  - Allocation history (including user emails) is publicly visible
 
-**Goal: Deep integration with XTS and python_raft**
+- [ ] **`GET /test_executions` has no auth** — `test_routes.py:259`
+  - Test execution data is publicly accessible
 
-- [x] **Implement XTS test execution tracking and lifecycle management (server callbacks)**
-  - Add device state: "testing" (distinct from "allocated") ✓
-  - Endpoint: `/start_test` - XTS/raft reports test start with test metadata ✓
-  - Endpoint: `/test_heartbeat` - periodic heartbeat during test execution ✓
-  - Endpoint: `/end_test` - reports test completion with status, exit_code, logs_url ✓
-  - Endpoint: `/test_executions` - query test runs with filtering ✓
-  - Allocation validation: check allocation still valid before starting tests ✓
-  - **Flexible expiry during testing**: ✓
-    - Skip devices in testing state from allocation expiry ✓
-    - Auto-extend allocation based on test's expected_duration ✓
-    - Never interrupt active test execution due to allocation expiry ✓
-  - **Timeslot management strategy**: ✓
-    - Use test's expected_duration to auto-extend allocations ✓
-    - Set maximum test duration cap (4 hours default, configurable) ✓
-    - Heartbeat timeout: detect hung tests (10 min default, configurable) ✓
-    - Track test time vs idle time separately in allocation history ✓
-  - Store test execution metadata: link test runs to allocation history ✓
-  - Background task: Detect and terminate hung/timeout tests ✓
+- [ ] **Hardcoded plaintext passwords** — `auth.py:238-254`
+  - `DEMO_USERS` dict with `"password": "admin123"` etc.
+  - Even for dev, this is a risk if deployed
+
+- [ ] **`/delete_slot` only requires `ROLE_ENGINEER`** — `device_routes.py:272`
+  - Destructive operation should arguably require `ROLE_ADMIN`
+
+### Code Quality Issues
+
+- [ ] **`build_target_id()` duplicated in 5 route files**
+  - Identical function in: `allocation_routes.py:39`, `device_routes.py:11`, `rack_routes.py:10`, `export_routes.py:10`, `usage_routes.py:12`
+  - Should be extracted to a shared module (e.g., `utils.py` or `helpers.py`)
+
+- [ ] **Orphaned `allocator.xts` file**
+  - `allocator.xts` is a subset copy of `xts_allocator.xts`
+  - Missing: `register`, `whoami`, `tutorial`, `borrow`/`return` commands, `brief`/`alias_name` fields
+  - The served file is `config/xts_allocator.xts`
+  - This orphan will drift out of sync — should be removed or documented
+
+- [ ] **State machine description missing `TESTING`** — `state_machine.py:141-151`
+  - `get_state_description()` has no entry for `DeviceState.TESTING`
+  - Returns "Unknown state" for testing devices
+
+### Deprecation Warnings (2,381 in test run)
+
+- [ ] **`datetime.utcnow()` — 66 occurrences across 17 files**
+  - Already in your TODO
+  - Python 3.12+ deprecation warning, will break in a future version
+  - Should use `datetime.now(timezone.utc)`
+
+- [ ] **`declarative_base()` from legacy import** — `models.py:2`
+  - `from sqlalchemy.ext.declarative import declarative_base` is deprecated since SQLAlchemy 2.0
+  - Should be `from sqlalchemy.orm import declarative_base`
+
+### Minor / Informational
+
+- [ ] **`GET /list_slots` has no rate limiting** — `device_routes.py:48`
+  - The POST version at line 84 does have it
+
+- [ ] **Synchronous DB sessions in an async framework**
+  - All routes use `SessionLocal()` (synchronous SQLAlchemy)
+  - Blocks Sanic's event loop during DB operations
+  - For production scale this would need async sessions
+
+### Summary
+
+| Category | Count | Severity |
+|----------|-------|----------|
+| Failing tests | 9 | **Critical** (easy fix — add `async`) |
+| Unprotected endpoints | 4 | **High** |
+| Code duplication | 2 | Medium |
+| Deprecation warnings | 2 | Medium (will break eventually) |
+| Minor issues | 3 | Low |
+
+**Highest-impact quick win:** Fix the 3 `def` → `async def` in `audit_log_routes.py` to get all 9 tests passing.
 
 ---
 
@@ -198,124 +163,13 @@
 
 ## Phase 5: Security & Access Control (P0 - CRITICAL)
 
-**Goal: Production-ready security before deployment**
-
-- [x] **Authentication system** ✓
-  - JWT token-based authentication with HS256 algorithm ✓
-  - `/auth/token` endpoint with email/password validation ✓
-  - `/auth/refresh` endpoint for token refresh ✓
-  - `/auth/me` endpoint to check token validity and user info ✓
-  - Access and refresh tokens (8h and 30d expiry) ✓
-  - User roles: admin (level 2), engineer (level 1), readonly (level 0) ✓
-  - Demo user database (replace with real DB in production) ✓
-  - `@require_auth()` decorator for protecting routes ✓
-  - Role hierarchy enforcement (admin > engineer > readonly) ✓
-  - Applied to all protected routes (allocations, devices, tests, admin operations) ✓
-  - `get_user_from_request()` helper for extracting authenticated user ✓
-  - **Result**: 19 new tests, full JWT auth system deployed to all routes
-
-- [x] **Authorization & access control** ✓
-  - Role-based access control (RBAC) implemented ✓
-  - Engineer role: standard operations (allocations, device management, tests) ✓
-  - Admin role: full access including forced deallocations, audit logs ✓
-  - Readonly role: view-only access (devices, history, metrics) ✓
-  - Route-level permission enforcement via decorator parameters ✓
-  - **Future**: Team-based permissions (multi-tenancy support)
-
-- [x] **API security hardening** ✓
-  - Rate limiting middleware: sliding window per-user via `@rate_limit` decorator ✓
-  - Applied to 15+ endpoints with user-based identifiers (`user_email_identifier`) ✓
-  - Allocations (30 req/min), devices (20-60 req/min), tests (30-120 req/min) ✓
-  - Input validation: email, string, integer, tags, user data validators ✓
-  - Applied to critical endpoints: allocate, deallocate, state change, start test ✓
-  - CORS middleware with configurable origins (CORS_ORIGINS env var) ✓
-  - CORS preflight OPTIONS handler ✓
-  - CORS_ENABLED flag for easy disable ✓
-  - Comprehensive test coverage: 9 rate limiting, 30 input validation tests ✓
-  - Integration with JWT auth for per-user rate limiting ✓
-  - **Future**: HTTPS enforcement, request size limits, API key rotation
-
-- [x] **Audit logging for security** ✓
-  - Centralized security audit log with AuditLog model ✓
-  - Database-persisted audit trail (who did what when) ✓
-  - Log all authentication attempts (login, failures, token refresh) ✓
-  - Log all privileged operations (allocations, state changes, admin actions) ✓
-  - Event categorization (authentication, device_operation, test_operation, admin_operation) ✓
-  - Severity levels (debug, info, warning, error, critical) ✓
-  - Metadata tracking (IP address, user agent, resource IDs) ✓
-  - Helper functions: `log_allocation()`, `log_state_change()`, `log_auth_failure()` ✓
-  - Admin-only query endpoints: `/audit/logs`, `/audit/summary`, `/audit/report` ✓
-  - Comprehensive filtering (user, event type, time range, severity, success/failure) ✓
-  - **Result**: Full audit logging system with 11 event types and admin dashboard
-  - **Future**: Tamper-proof logging (append-only, external sink like S3/CloudWatch)
+- [ ] **Database connection improvements**
+  - Transaction isolation level configuration
+  - Database backup strategy
 
 ---
 
 ## Phase 6: Observability & Production Readiness (P0)
-
-**Goal: Monitor, debug, and maintain production system**
-
-- [x] **Prometheus metrics integration** ✓
-  - Converted `/metrics` endpoint to support both JSON and Prometheus formats ✓
-  - Added `/metrics?format=prometheus` query parameter ✓
-  - Added dedicated `/metrics/prometheus` endpoint ✓
-  - Gauges: `device_state_total{state}`, `device_total`, `device_rack_total{rack_id}` ✓
-  - Counters: `allocations_today_total`, `tests_completed_today_total` ✓
-  - Gauges: `allocation_duration_avg_seconds`, `test_duration_avg_seconds`, `device_utilization_percent` ✓
-  - Proper content-type: `text/plain; version=0.0.4` ✓
-  - Backward compatible: JSON format by default ✓
-  - **Result**: 3 new tests, Grafana/Prometheus ready
-
-- [x] **OpenAPI/Swagger documentation** ✓
-  - OpenAPI 3.0 specification: `openapi_spec.py` with complete API schema ✓
-  - `/openapi.json` endpoint serves spec ✓
-  - All major endpoints documented: allocations, devices, tests, export, federation, health ✓
-  - Request/response schemas defined for all operations ✓
-  - Validation constraints included (max lengths, min/max values, formats) ✓
-  - Rate limiting documented (429 responses) ✓
-  - **Result**: 1 new test, ready for Swagger UI integration
-  - **TODO**: Add Swagger UI frontend (sanic-openapi or static HTML)
-  - Include authentication requirements
-  - Enable API client SDK generation
-
-- [x] **Database migration to PostgreSQL** ✓
-  - Comprehensive `config.py` with environment-based configuration ✓
-  - Support for SQLite (development) and PostgreSQL (production) ✓
-  - Environment variables for all settings (DB, JWT, CORS, server, logging) ✓
-  - Connection pooling for PostgreSQL (pool_size=10, max_overflow=20, pool_pre_ping=True) ✓
-  - Updated models.py with PostgreSQL engine configuration ✓
-  - Updated Alembic env.py to use config system ✓
-  - Added psycopg2-binary==2.9.9 to requirements.txt ✓
-  - Created POSTGRESQL_MIGRATION.md guide (setup, migration, backup, troubleshooting) ✓
-  - Config validation with security warnings ✓
-  - DevelopmentConfig, ProductionConfig, TestingConfig classes ✓
-  - **Result**: Production-ready database configuration system
-  - **TODO**: Test actual PostgreSQL deployment, create data migration script, enable multi-worker support
-
-- [x] **Structured audit logging** ✓
-  - Database-backed audit log with structured fields (AuditLog table) ✓
-  - Queryable via REST API with filtering and aggregation ✓
-  - Security event categorization and severity tracking ✓
-  - Full metadata capture (timestamp, user, IP, resource, event details) ✓
-  - Admin dashboard for compliance reporting and forensics ✓
-  - **Future**: JSON log file output, ELK/Splunk integration, correlation IDs, log sampling
-
-- [x] **Database management & testing infrastructure** ✓
-  - Dual database system (test/development/production modes) ✓
-  - Automatic mode handling in test.sh (uses test DB) ✓
-  - Automatic mode handling in run.sh (uses development DB) ✓
-  - bin/db-status: Database status and statistics display (4.9KB) ✓
-  - bin/db-switch: Mode switching with confirmation (3.2KB) ✓
-  - bin/db-clean: Test database cleanup with safety features (6.8KB) ✓
-  - Safety features: test-only defaults, confirmation prompts, force flags ✓
-  - DATABASE_MANAGEMENT.md: Complete guide (8.2KB) ✓
-  - DB_QUICK_REFERENCE.txt: Quick reference card ✓
-  - Demo scripts and verification testing ✓
-  - **Result**: Zero-friction testing with automatic database isolation, production data protected
-
-- [ ] **Database connection improvements**
-  - Transaction isolation level configuration
-  - Database backup strategy
 
 - [ ] **Automated backup & disaster recovery**
   - Daily automated database backups
@@ -400,37 +254,7 @@
 
 ---
 
-## Phase 8.5: Documentation & Developer Experience (Completed)
-
-**Goal: Comprehensive AI agent instructions and developer onboarding**
-
-- [x] **AI Agent Instructions (Copilot/Cursor/Cline)** ✓
-  - Comprehensive `.github/copilot-instructions.md` for AI coding agents ✓
-  - RDK Central development standards (Git Flow, commit message 50/72 rule) ✓
-  - Architecture overview (10 blueprints, 6 models, core components) ✓
-  - Authentication & security patterns with code examples ✓
-  - Testing patterns for auth-protected routes with fixtures ✓
-  - Audit log debugging guide with curl examples ✓
-  - Database configuration (SQLite dev, PostgreSQL prod) ✓
-  - Critical workflows (setup, testing, 3rdParty integration) ✓
-  - Common pitfalls & known issues section ✓
-  - Session handling, allocation patterns, state machine rules ✓
-  - **Result**: 415-line comprehensive guide for immediate AI agent productivity
-
----
-
 ## Phase 9: Test Coverage Improvements (Ongoing)
-
-**Goal: Comprehensive test coverage for reliability**
-
-- [x] **Concurrency & race condition tests** ✓
-  - Test double allocation prevention (2+ users, same device) ✓
-  - Test sequential double allocation rejection ✓
-  - Test state machine enforces valid transitions ✓
-  - Database transaction integrity verification ✓
-  - Allocation history created atomically ✓
-  - State consistency across operations (owner cleared, expiry set, etc.) ✓
-  - **Result**: 11 new tests, all passing
 
 - [ ] **Integration test suite**
   - Re-enable 3 skipped federation httpx tests
@@ -486,15 +310,6 @@
 
 **Note:** We control all repos - can raise tickets and branch using git flow for coordinated development across
 xts_allocator_server, xts_core, and python_raft
-
-### XTS Core Team
-
-- [ ] Implement allocator commands in xts_core
-  - Parse and execute .xts file from allocator server
-  - Handle config download and local storage
-  - Orchestrate allocation → raft invocation workflow
-  - Support passthrough parameters for dynamic test arguments
-  - **Ticket/Branch**: Can work in parallel with allocator server development
 
 ### Python RAFT Team
 
