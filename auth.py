@@ -9,7 +9,6 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from sanic.response import json as sanic_json
 from logging_config import get_logger
-from typing import Optional
 
 logger = get_logger()
 

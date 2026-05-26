@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Test connectivity to devices in the allocator."""
 
-import json
 import subprocess
 import sys
 from models import SessionLocal, Device

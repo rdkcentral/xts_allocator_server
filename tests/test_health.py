@@ -1,6 +1,5 @@
 """Tests for health check and metrics endpoints."""
 
-import pytest
 
 
 class TestHealth:

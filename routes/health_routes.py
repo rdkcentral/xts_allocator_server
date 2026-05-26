@@ -2,7 +2,7 @@ from sanic import Blueprint
 from sanic.response import json, text
 from models import SessionLocal, Device, AllocationHistory, TestExecution
 from sqlalchemy import func
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from prometheus_metrics import format_prometheus_metrics, calculate_utilization
 from openapi_spec import generate_openapi_spec
 

@@ -5,7 +5,7 @@ Creates test_executions table for test lifecycle tracking.
 """
 
 from sqlalchemy import inspect
-from models import engine, SessionLocal, Base, TestExecution
+from models import engine, SessionLocal, TestExecution
 
 def migrate():
     """Run migration to add Phase 3 tables."""

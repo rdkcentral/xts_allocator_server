@@ -1,7 +1,7 @@
 from sanic import Blueprint
 from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory, Rack
-from state_machine import DeviceState, can_transition, transition_device, get_valid_transitions, is_valid_state
+from state_machine import DeviceState, transition_device, get_valid_transitions, is_valid_state
 from logging_config import get_logger
 from datetime import datetime, timedelta, timezone
 from rate_limiter import rate_limit, user_email_identifier

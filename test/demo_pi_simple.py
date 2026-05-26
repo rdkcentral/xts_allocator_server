@@ -4,7 +4,6 @@ Simplified Pi device workflow demonstration.
 Shows complete allocation lifecycle without API calls.
 """
 
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from models import SessionLocal, Device, AllocationHistory, TestExecution

@@ -1,7 +1,5 @@
 """Tests for allocation history tracking."""
 
-import pytest
-from datetime import datetime
 
 
 class TestAllocationHistory:

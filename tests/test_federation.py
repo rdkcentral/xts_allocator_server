@@ -226,7 +226,7 @@ class TestFederatedServers:
         
         # Mock network error with proper async support
         import httpx
-        from unittest.mock import Mock, MagicMock
+        from unittest.mock import MagicMock
         
         mock_client_instance = MagicMock()
         mock_client_instance.get = AsyncMock(side_effect=httpx.RequestError("Connection refused"))

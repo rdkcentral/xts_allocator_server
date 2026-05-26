@@ -1,13 +1,11 @@
 """Tests for audit logging system."""
 
-import pytest
-from datetime import datetime, timedelta
 from models import SessionLocal, AuditLog
 from audit_log import (
     log_auth_attempt, log_unauthorized_access, log_device_allocation,
     log_device_deallocation, log_state_change, log_device_operation,
     log_test_execution, EVENT_AUTH_LOGIN, EVENT_AUTH_FAILURE,
-    CATEGORY_AUTHENTICATION, SEVERITY_INFO, SEVERITY_WARNING
+    SEVERITY_INFO, SEVERITY_WARNING
 )
 
 

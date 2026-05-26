@@ -1,6 +1,5 @@
 """Tests for rack operations."""
 
-import pytest
 
 
 class TestRacks:

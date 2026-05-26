@@ -3,7 +3,7 @@ from sanic.response import json
 from sqlalchemy import func, or_
 from models import SessionLocal, Device, Rack
 from rate_limiter import rate_limit, user_email_identifier
-from auth import require_auth, ROLE_ENGINEER, ROLE_READONLY
+from auth import require_auth, ROLE_ENGINEER
 
 from routes.utils import build_target_id, normalize_tags
 

@@ -1,7 +1,5 @@
 """Tests for allocation and deallocation endpoints."""
 
-import pytest
-from datetime import datetime, timedelta
 
 
 class TestAllocation:

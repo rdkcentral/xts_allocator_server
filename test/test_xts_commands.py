@@ -5,7 +5,6 @@ Tests all commands in xts_allocator.xts for proper execution and output.
 """
 
 import subprocess
-import json
 import sys
 import os
 from pathlib import Path

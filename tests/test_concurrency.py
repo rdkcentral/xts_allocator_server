@@ -1,9 +1,5 @@
 """Tests for concurrent operations and race conditions."""
 
-import pytest
-from models import SessionLocal, Device
-from state_machine import transition_device, DeviceState
-from datetime import datetime
 
 
 class TestConcurrentAllocations:
