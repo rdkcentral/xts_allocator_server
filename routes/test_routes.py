@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from rate_limiter import rate_limit, user_email_identifier
 from input_validation import validate_integer, validate_string, validate_email, ValidationError
 from auth import require_auth, ROLE_ENGINEER
-from routes.utils import ensure_utc
+from routes.utils import ensure_utc, build_target_id
 
 test_routes = Blueprint("test_routes")
 logger = get_logger()
@@ -314,6 +314,63 @@ async def list_test_executions(request):
     
     except Exception as e:
         logger.error(f"List test executions error: {str(e)}", exc_info=True)
+        return json({"error": str(e)}, status=500)
+    finally:
+        session.close()
+
+
+@test_routes.get("/device/<device_id:int>/box_status")
+@rate_limit(max_requests=120, window_seconds=60)
+async def get_box_status(request, device_id):
+    """Compact box-status payload for RAFT/XTS polling.
+
+    Returns the minimum a polling client needs: device state, target_id,
+    current owner, active test summary (if any) with elapsed minutes and
+    heartbeat age in seconds, allocation expiry. No rack metadata, no
+    historical lists — keep this lightweight so it can be polled often.
+    """
+    session = SessionLocal()
+    try:
+        device = session.query(Device).filter(Device.id == device_id).first()
+        if not device:
+            return json({"error": f"Device {device_id} not found"}, status=404)
+
+        now = datetime.now(timezone.utc)
+
+        active = (
+            session.query(TestExecution)
+            .filter(
+                TestExecution.device_id == device_id,
+                TestExecution.end_time.is_(None),
+            )
+            .order_by(TestExecution.start_time.desc())
+            .first()
+        )
+        active_test = None
+        if active is not None:
+            elapsed = (now - ensure_utc(active.start_time)).total_seconds() / 60
+            heartbeat_age = None
+            if active.last_heartbeat is not None:
+                heartbeat_age = (now - ensure_utc(active.last_heartbeat)).total_seconds()
+            active_test = {
+                "id": active.id,
+                "name": active.test_name,
+                "suite": active.test_suite,
+                "status": active.status,
+                "elapsed_minutes": round(elapsed, 2),
+                "heartbeat_age_seconds": round(heartbeat_age, 1) if heartbeat_age is not None else None,
+            }
+
+        return json({
+            "device_id": device.id,
+            "target_id": build_target_id(device),
+            "state": device.state,
+            "owner_email": device.owner_email,
+            "allocation_expiry": device.allocation_expiry.isoformat() if device.allocation_expiry else None,
+            "active_test": active_test,
+        }, status=200)
+    except Exception as e:
+        logger.error(f"box_status error for device {device_id}: {e}", exc_info=True)
         return json({"error": str(e)}, status=500)
     finally:
         session.close()
