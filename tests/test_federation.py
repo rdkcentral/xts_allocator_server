@@ -1,5 +1,55 @@
+import json as json_module
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 import pytest
-from unittest.mock import patch, AsyncMock
+
+
+@contextmanager
+def _fake_slave_server(payload_by_path, *, fail_with=None):
+    """Spin up an in-process HTTP server on an ephemeral port that returns
+    canned JSON for each path in ``payload_by_path``.
+
+    The master federation routes use ``httpx.AsyncClient`` to proxy to the
+    slave's real URL, so we need an actual listening socket rather than a
+    mocked transport (sanic_testing also drives requests through httpx and
+    a global patch hijacks the test client itself).
+
+    If ``fail_with`` is provided, the handler returns that HTTP status for
+    every request, letting tests exercise the master's error path.
+    """
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass  # silence stderr access logs
+
+        def do_GET(self):
+            if fail_with is not None:
+                self.send_response(fail_with)
+                self.end_headers()
+                return
+            body = payload_by_path.get(self.path)
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            encoded = json_module.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_port
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 class TestFederatedServers:
@@ -173,117 +223,68 @@ class TestFederatedServers:
         assert response.status == 404
         assert "not found" in response.json["error"]
     
-    @pytest.mark.skip(reason="Complex httpx mocking - requires integration test with real server")
-    @patch('routes.federation_routes.httpx.AsyncClient')
-    def test_get_server_devices_success(self, mock_client_class, test_client, sample_devices):
-        """Test proxying device request to slave server."""
-        # Register server
-        server_data = {
-            "name": "slave-1",
-            "url": "http://192.168.1.100:5000",
-            "location": "Building A"
-        }
-        _, reg_response = test_client.post("/register", json=server_data)
-        server_id = reg_response.json["server_id"]
-        
-        # Mock httpx.AsyncClient with proper async context manager
-        from unittest.mock import Mock, MagicMock
-        
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "slots": [
-                {"id": 1, "rackName": "Rack1", "slotName": "Slot1", "state": "free"}
-            ]
-        }
-        
-        mock_client_instance = MagicMock()
-        mock_client_instance.get = AsyncMock(return_value=mock_response)
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-        mock_client_class.return_value = mock_client_instance
-        
-        _, response = test_client.get(f"/servers/{server_id}/devices")
-        
+    def test_get_server_devices_success(self, test_client, sample_devices):
+        """Master proxies /list_slots to a slave and wraps the response."""
+        slave_slots = [
+            {"id": 1, "rackName": "Rack1", "slotName": "Slot1", "state": "free"}
+        ]
+        with _fake_slave_server({"/list_slots": {"slots": slave_slots}}) as slave_url:
+            _, reg_response = test_client.post("/register", json={
+                "name": "slave-1", "url": slave_url, "location": "Building A"
+            })
+            server_id = reg_response.json["server_id"]
+
+            _, response = test_client.get(f"/servers/{server_id}/devices")
+
         assert response.status == 200
         data = response.json
         assert data["server_id"] == server_id
         assert data["server_name"] == "slave-1"
-        assert "devices" in data
-    
-    @pytest.mark.skip(reason="Complex httpx mocking - requires integration test with real server")
-    @patch('routes.federation_routes.httpx.AsyncClient')
-    def test_get_server_devices_unreachable(self, mock_client_class, test_client):
-        """Test handling unreachable slave server."""
-        # Register server
-        server_data = {
+        assert data["devices"] == slave_slots
+
+    def test_get_server_devices_unreachable(self, test_client):
+        """When the slave is unreachable, master returns 503 and marks the server unreachable."""
+        # Bind-and-immediately-close a socket to grab an unused port, then point
+        # the registered slave at it — the master's httpx call will get
+        # ECONNREFUSED, which is exactly the path we want to exercise.
+        import socket
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        dead_port = s.getsockname()[1]
+        s.close()
+
+        _, reg_response = test_client.post("/register", json={
             "name": "slave-1",
-            "url": "http://192.168.1.100:5000",
-            "location": "Building A"
-        }
-        _, reg_response = test_client.post("/register", json=server_data)
+            "url": f"http://127.0.0.1:{dead_port}",
+            "location": "Building A",
+        })
         server_id = reg_response.json["server_id"]
-        
-        # Mock network error with proper async support
-        import httpx
-        from unittest.mock import MagicMock
-        
-        mock_client_instance = MagicMock()
-        mock_client_instance.get = AsyncMock(side_effect=httpx.RequestError("Connection refused"))
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-        mock_client_class.return_value = mock_client_instance
-        
+
         _, response = test_client.get(f"/servers/{server_id}/devices")
-        
+
         assert response.status == 503
         assert "Unable to reach server" in response.json["error"]
-    
-    @pytest.mark.skip(reason="Complex httpx mocking - requires integration test with real server")
-    @patch('routes.federation_routes.httpx.AsyncClient')
-    def test_list_federated_devices(self, mock_client_class, test_client):
-        """Test aggregating devices from all slave servers."""
-        # Register servers
-        servers = [
-            {"name": "slave-1", "url": "http://192.168.1.100:5000", "location": "Building A"},
-            {"name": "slave-2", "url": "http://192.168.1.101:5000", "location": "Building B"}
-        ]
-        
-        for server in servers:
-            test_client.post("/register", json=server)
-        
-        # Mock responses from slave servers with proper async context manager
-        from unittest.mock import Mock, MagicMock
-        
-        mock_response1 = Mock()
-        mock_response1.status_code = 200
-        mock_response1.json.return_value = {
-            "slots": [{"id": 1, "state": "free"}]
-        }
-        
-        mock_response2 = Mock()
-        mock_response2.status_code = 200
-        mock_response2.json.return_value = {
-            "slots": [{"id": 2, "state": "allocated"}]
-        }
-        
-        # Track calls to alternate responses
-        call_tracker = [0]
-        async def mock_get_alternate(*args, **kwargs):
-            result = mock_response1 if call_tracker[0] == 0 else mock_response2
-            call_tracker[0] += 1
-            return result
-        
-        mock_client_instance = MagicMock()
-        mock_client_instance.get = mock_get_alternate
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-        mock_client_class.return_value = mock_client_instance
-        
-        _, response = test_client.get("/devices/federated")
-        
+
+        # The route marks the server as unreachable on its way out.
+        _, details = test_client.get(f"/servers/{server_id}")
+        assert details.json["status"] == "unreachable"
+
+    def test_list_federated_devices(self, test_client):
+        """/devices/federated aggregates /list_slots responses across online slaves."""
+        with _fake_slave_server({"/list_slots": {"slots": [{"id": 1, "state": "free"}]}}) as url_a, \
+             _fake_slave_server({"/list_slots": {"slots": [{"id": 2, "state": "allocated"}]}}) as url_b:
+            for name, url, location in (
+                ("slave-1", url_a, "Building A"),
+                ("slave-2", url_b, "Building B"),
+            ):
+                test_client.post("/register", json={"name": name, "url": url, "location": location})
+
+            _, response = test_client.get("/devices/federated")
+
         assert response.status == 200
         data = response.json
-        assert "devices" in data
-        assert data["total_devices"] >= 2
+        assert data["total_devices"] == 2
         assert data["servers_queried"] == 2
+        # Each device should carry the server context the aggregator stamped on.
+        server_names = {d["server_name"] for d in data["devices"]}
+        assert server_names == {"slave-1", "slave-2"}
