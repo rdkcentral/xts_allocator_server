@@ -92,8 +92,7 @@ class TestDatabaseTransactionIntegrity:
     def test_failed_allocation_rolls_back_cleanly(self, test_client, sample_devices, auth_headers_engineer):
         """Test that failed allocations don't leave partial data."""
         device = sample_devices[0]
-        original_state = device.state
-        
+
         # Attempt allocation with missing required field (should fail)
         _, response = test_client.post("/allocate_slot", json={
             "user": {"email": "test@example.com"},  # Missing username (some routes may require it)

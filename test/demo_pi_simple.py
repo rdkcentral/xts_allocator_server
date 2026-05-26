@@ -168,8 +168,7 @@ def main():
         # Complete allocation history
         history.end_time = datetime.now(timezone.utc)
         history.state_after = "free"
-        actual_duration = int((history.end_time - history.start_time).total_seconds() / 60)
-        
+
         # Clear device allocation
         pi_device.owner_email = None
         pi_device.allocation_expiry = None
