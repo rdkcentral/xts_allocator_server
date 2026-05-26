@@ -1,6 +1,5 @@
 """Tests for config export endpoints."""
 
-import pytest
 import yaml
 
 

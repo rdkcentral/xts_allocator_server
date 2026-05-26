@@ -8,7 +8,7 @@ Adds new columns to existing tables:
 """
 
 from sqlalchemy import text, inspect
-from models import engine, SessionLocal, Base, Server
+from models import engine, SessionLocal, Server
 
 def migrate():
     """Run migration to add Phase 2 columns."""

@@ -1,6 +1,6 @@
 from sanic import Blueprint
 from sanic.response import json
-from models import SessionLocal, Server, Device
+from models import SessionLocal, Server
 from datetime import datetime, timedelta, timezone
 from logging_config import get_logger
 from routes.utils import ensure_utc

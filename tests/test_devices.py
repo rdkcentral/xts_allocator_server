@@ -1,6 +1,5 @@
 """Tests for device CRUD operations."""
 
-import pytest
 
 
 class TestDeviceListings:

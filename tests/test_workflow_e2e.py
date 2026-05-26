@@ -1,6 +1,5 @@
 """End-to-end workflow tests — full device lifecycle through the API."""
 
-import pytest
 
 
 class TestAllocateTestReleaseCycle:

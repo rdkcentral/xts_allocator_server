@@ -1,6 +1,5 @@
 """Tests for device state transitions."""
 
-import pytest
 
 
 class TestStateTransitions:

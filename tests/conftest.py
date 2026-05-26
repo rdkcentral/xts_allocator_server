@@ -4,7 +4,6 @@ import pytest
 import os
 from models import Base, engine, SessionLocal, Device, Rack, Server, TestExecution, AllocationHistory, AuditLog
 from app import app as sanic_app
-from datetime import datetime
 from auth import generate_token, ROLE_ENGINEER, ROLE_ADMIN, ROLE_READONLY
 from rate_limiter import get_rate_limiter
 

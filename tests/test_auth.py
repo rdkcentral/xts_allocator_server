@@ -59,7 +59,6 @@ class TestTokenVerification:
     def test_verify_expired_token(self):
         """Test verifying expired token."""
         # Create token that expires immediately
-        import time
         from datetime import datetime, timedelta, timezone
 
         expire = datetime.now(timezone.utc) - timedelta(seconds=1)  # Already expired

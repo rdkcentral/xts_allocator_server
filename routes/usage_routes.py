@@ -3,7 +3,6 @@ from sanic.response import json
 from models import SessionLocal, Device, AllocationHistory
 from datetime import datetime, timedelta, timezone
 from logging_config import get_logger
-from sqlalchemy import func
 
 from routes.utils import build_target_id
 

@@ -12,7 +12,7 @@ from routes.audit_log_routes import audit_log_bp
 from models import SessionLocal, Device, TestExecution
 from state_machine import DeviceState, transition_device
 from logging_config import setup_logging, get_logger
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import os
 import sys
 import signal

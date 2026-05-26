@@ -1,7 +1,5 @@
 """Tests for test execution lifecycle routes."""
 
-import pytest
-from datetime import datetime, timedelta
 
 
 class TestTestExecutionLifecycle:
