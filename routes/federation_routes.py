@@ -79,13 +79,17 @@ async def heartbeat(request):
     session = SessionLocal()
     try:
         data = request.json
-        
+
         name = data.get("name")
-        device_count = data.get("device_count", 0)
+        raw_count = data.get("device_count", 0)
         status = data.get("status", "online")
-        
+
         if not name:
             return json({"error": "name is required"}, status=400)
+        try:
+            device_count = int(raw_count) if raw_count is not None else 0
+        except (TypeError, ValueError):
+            return json({"error": "device_count must be an integer"}, status=400)
         
         server = session.query(Server).filter(Server.name == name).first()
         
@@ -123,10 +127,13 @@ async def list_servers(request):
     session = SessionLocal()
     try:
         query = session.query(Server)
-        
-        # Filter by status if provided
+
+        # Filter by status if provided — cap length so unbounded input
+        # cannot flow into SQLAlchemy bind params and 500.
         status_filter = request.args.get("status")
         if status_filter:
+            if len(status_filter) > 64:
+                return json({"error": "status filter too long (max 64)"}, status=400)
             query = query.filter(Server.status == status_filter)
         
         servers = query.all()

@@ -104,9 +104,15 @@ async def get_usage_summary(request):
     """
     session = SessionLocal()
     try:
-        # Get query parameters
-        days = int(request.args.get("days", 30))  # Default last 30 days
-        
+        # Get query parameters — clamp to a sane range so bad input returns
+        # 400 instead of overflowing into datetime arithmetic.
+        try:
+            days = int(request.args.get("days", 30))
+        except (TypeError, ValueError):
+            return json({"error": "days must be an integer"}, status=400)
+        if days <= 0 or days > 3650:  # 10 years cap
+            return json({"error": "days must be between 1 and 3650"}, status=400)
+
         since = datetime.now(timezone.utc) - timedelta(days=days)
         
         # Query allocations in timeframe

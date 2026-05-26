@@ -4,8 +4,23 @@ from sqlalchemy import func, or_
 from models import SessionLocal, Device, Rack
 from rate_limiter import rate_limit, user_email_identifier
 from auth import require_auth, ROLE_ENGINEER
+from input_validation import validate_string, ValidationError
 
 from routes.utils import build_target_id, normalize_tags
+
+
+_MAX_STR = 255
+_MAX_FREE_TEXT = 1024
+
+
+def _coerce_str(value, field_name, max_length=_MAX_STR):
+    """Reject non-str / oversized values at the API boundary so they cannot
+    flow into SQLAlchemy bind params and trigger a 500."""
+    if value is None:
+        return None
+    if not isinstance(value, (str, int, float)):
+        raise ValidationError(f"{field_name} must be a string (got {type(value).__name__})")
+    return validate_string(str(value), field_name, max_length=max_length, required=False)
 
 device_routes = Blueprint("device_routes")
 
@@ -72,6 +87,16 @@ async def list_slots_filters(request):
     session = SessionLocal()
     try:
         criteria = request.json or {}
+        # Guard string filters against unbounded input / wrong types before
+        # they reach SQLAlchemy bind params.
+        try:
+            for field in ("platform", "description", "rackName", "state",
+                          "owner_email", "query", "target_id",
+                          "has_equipment_type", "has_equipment"):
+                if field in criteria:
+                    criteria[field] = _coerce_str(criteria[field], field, _MAX_FREE_TEXT)
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
         query = session.query(Device).join(Rack)
 
         if "platform" in criteria:
@@ -182,10 +207,17 @@ async def add_slot(request):
     """Add a new slot to the database."""
     session = SessionLocal()
     try:
-        data = request.json
+        data = request.json or {}
 
         if "rackName" not in data or "slotName" not in data:
             return json({"error": "Missing required fields: rackName and slotName"}, status=400)
+
+        # Reject non-string rackName / slotName before they reach SQLAlchemy.
+        try:
+            data["rackName"] = _coerce_str(data["rackName"], "rackName")
+            data["slotName"] = _coerce_str(data["slotName"], "slotName")
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
 
         # Find or create rack
         rack = session.query(Rack).filter(Rack.name == data["rackName"]).first()
