@@ -1,5 +1,6 @@
 from sanic import Blueprint
 from sanic.response import json
+from sqlalchemy import func
 from models import SessionLocal, Device
 
 device_routes = Blueprint("device_routes")
@@ -12,10 +13,14 @@ async def list_slots(request):
         slots = session.query(Device).all()
         slots_list = [
             {
+                "slot_id": slot.id,
                 "rackName": slot.rack_name,
                 "slotName": slot.slot_name,
+                "platform": slot.platform,
                 "description": slot.description,
-                "tags": slot.tags.split(",") if slot.tags else []
+                "tags": slot.tags.split(",") if slot.tags else [],
+                "state": slot.state,
+                "owner_email": slot.owner_email,
             }
             for slot in slots
         ]
@@ -42,10 +47,14 @@ async def list_slots_filters(request):
 
         matching_slots = [
             {
+                "slot_id": slot.id,
                 "rackName": slot.rack_name,
                 "slotName": slot.slot_name,
+                "platform": slot.platform,
                 "description": slot.description,
-                "tags": slot.tags.split(",") if slot.tags else []
+                "tags": slot.tags.split(",") if slot.tags else [],
+                "state": slot.state,
+                "owner_email": slot.owner_email
             }
             for slot in query.all()
         ]
@@ -59,6 +68,8 @@ def update_slot_fields(slot, data):
         slot.rack_name = data["rackName"]
     if "slotName" in data:
         slot.slot_name = data["slotName"]
+    if "platform" in data:
+        slot.platform = data["platform"]
     if "description" in data:
         slot.description = data["description"]
     if "tags" in data:
@@ -74,8 +85,23 @@ async def add_slot(request):
         if "rackName" not in data or "slotName" not in data:
             return json({"error": "Missing required fields: rackName and slotName"}, status=400)
 
-        new_slot = Device(rack_name="", slot_name="", description="", tags="")
+        new_slot = Device(rack_name="", 
+                          slot_name="",
+                          platform="", 
+                          description="", 
+                          tags="", 
+                          state="free",     #default state
+                          owner_email=None) #default owner
         update_slot_fields(new_slot, data)
+        
+        # override state if provided
+        if "state" in data and data["state"] in ["free", "allocated"]:
+            new_slot.state = data["state"]
+
+        # override owner_email if provided
+        if "owner_email" in data:
+            new_slot.owner_email = data["owner_email"]
+            
         session.add(new_slot)
         session.commit()
 
