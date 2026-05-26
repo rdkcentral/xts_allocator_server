@@ -171,6 +171,6 @@ def user_email_identifier(request):
         if data and "user" in data and "email" in data["user"]:
             return data["user"]["email"]
     except Exception:
+        # Malformed body / non-JSON / missing keys — fall through to IP-based identification.
         pass
-    # Fall back to IP if no email found
     return request.ip

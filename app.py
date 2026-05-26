@@ -197,6 +197,10 @@ if __name__ == "__main__":
         app.run(host="0.0.0.0",
                 port=5000,
                 single_process=True)
+    except PermissionError as e:
+        logger.error(f"❌ Permission denied: {e}")
+        logger.error("   Check file permissions or try running with appropriate privileges")
+        sys.exit(3)
     except OSError as e:
         if e.errno == 98:  # Address already in use
             logger.error("❌ Port 5000 is already in use. Stop the existing server first.")
@@ -205,10 +209,6 @@ if __name__ == "__main__":
         else:
             logger.error(f"❌ Network error: {e}")
             sys.exit(2)
-    except PermissionError as e:
-        logger.error(f"❌ Permission denied: {e}")
-        logger.error("   Check file permissions or try running with appropriate privileges")
-        sys.exit(3)
     except ImportError as e:
         logger.error(f"❌ Missing dependency: {e}")
         logger.error("   Run: pip install -r requirements.txt")

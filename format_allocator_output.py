@@ -48,7 +48,7 @@ def format_device_list(data):
             try:
                 exp_dt = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
                 expiry_str = exp_dt.strftime('%Y-%m-%d %H:%M')
-            except:
+            except (ValueError, TypeError, AttributeError):
                 expiry_str = expiry[:20]
         else:
             expiry_str = '-'
