@@ -3,10 +3,14 @@ from sanic.response import json
 from sqlalchemy import func, case, or_
 from models import SessionLocal, Rack, Device
 from rate_limiter import rate_limit, user_email_identifier
+from input_validation import validate_string, ValidationError
 
 from routes.utils import build_target_id, normalize_tags
 
 rack_routes = Blueprint("rack_routes")
+
+
+_MAX_SEARCH_TEXT = 1024
 
 
 @rack_routes.get("/list_racks")
@@ -140,6 +144,17 @@ async def search_devices(request):
     session = SessionLocal()
     try:
         filters = request.json or {}
+        # Cap free-text filter strings so unbounded input cannot reach
+        # SQLAlchemy bind params and trigger a 500.
+        try:
+            for field in ("rack_name", "platform", "state", "query"):
+                if field in filters and not isinstance(filters[field], (list, dict)):
+                    filters[field] = validate_string(
+                        str(filters[field]), field,
+                        max_length=_MAX_SEARCH_TEXT, required=False
+                    )
+        except ValidationError as e:
+            return json({"error": str(e)}, status=400)
         query = session.query(Device)
         
         # Filter by rack

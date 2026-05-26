@@ -47,6 +47,20 @@ async def get_audit_logs(request):
         until = request.args.get("until")
         limit = min(int(request.args.get("limit", 100)), 1000)
         offset = int(request.args.get("offset", 0))
+
+        # Cap string filter lengths so unbounded query-string values cannot
+        # flow into SQLAlchemy bind params and trigger a 500.
+        _max_filter = 254
+        for label, value in (
+            ("user_email", user_email),
+            ("event_type", event_type),
+            ("event_category", event_category),
+            ("resource_type", resource_type),
+            ("resource_id", resource_id),
+            ("severity", severity),
+        ):
+            if value is not None and len(value) > _max_filter:
+                return sanic_json({"error": f"{label} filter too long (max {_max_filter})"}, status=400)
         
         # Build query
         query = session.query(AuditLog)

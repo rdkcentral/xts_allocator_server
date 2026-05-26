@@ -9,11 +9,23 @@ from routes.utils import build_target_id
 export_routes = Blueprint("export_routes")
 
 
+_MAX_FILTER_LEN = 254  # RFC 5321 email cap; bound other filter strings the same way.
+
+
+def _cap_query_param(request, name):
+    """Reject oversized query-string values at the boundary so they cannot
+    flow into SQLAlchemy bind params and crash the export."""
+    value = request.args.get(name)
+    if value is not None and len(value) > _MAX_FILTER_LEN:
+        raise ValueError(f"{name} exceeds maximum length of {_MAX_FILTER_LEN}")
+    return value
+
+
 def _get_allocated_devices(session, request):
     """Fetch allocated devices with optional filters."""
-    allocation_id = request.args.get("allocation_id")
-    owner_email = request.args.get("owner_email")
-    platform = request.args.get("platform")
+    allocation_id = _cap_query_param(request, "allocation_id")
+    owner_email = _cap_query_param(request, "owner_email")
+    platform = _cap_query_param(request, "platform")
 
     if not allocation_id and not owner_email:
         raise ValueError("Either allocation_id or owner_email must be provided")
@@ -199,21 +211,24 @@ async def export_raft_config(request):
     """
     session = SessionLocal()
     try:
-        allocation_id = request.args.get("allocation_id")
-        owner_email = request.args.get("owner_email")
-        
+        try:
+            allocation_id = _cap_query_param(request, "allocation_id")
+            owner_email = _cap_query_param(request, "owner_email")
+        except ValueError as e:
+            return json_response({"error": str(e)}, status=400)
+
         if not allocation_id and not owner_email:
             return json_response({
                 "error": "Either allocation_id or owner_email must be provided"
             }, status=400)
-        
+
         # Build query
         query = session.query(Device).join(Rack)
         if allocation_id:
             query = query.filter(Device.id == int(allocation_id))
         if owner_email:
             query = query.filter(Device.owner_email == owner_email)
-        
+
         devices = query.all()
         
         if not devices:
@@ -295,21 +310,24 @@ async def export_python_raft_config(request):
     """
     session = SessionLocal()
     try:
-        allocation_id = request.args.get("allocation_id")
-        owner_email = request.args.get("owner_email")
-        
+        try:
+            allocation_id = _cap_query_param(request, "allocation_id")
+            owner_email = _cap_query_param(request, "owner_email")
+        except ValueError as e:
+            return json_response({"error": str(e)}, status=400)
+
         if not allocation_id and not owner_email:
             return json_response({
                 "error": "Either allocation_id or owner_email must be provided"
             }, status=400)
-        
+
         # Build query
         query = session.query(Device).join(Rack)
         if allocation_id:
             query = query.filter(Device.id == int(allocation_id))
         if owner_email:
             query = query.filter(Device.owner_email == owner_email)
-        
+
         devices = query.all()
         
         if not devices:
