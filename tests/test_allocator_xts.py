@@ -214,11 +214,9 @@ class TestCommandGroups:
         # tutorial is a valid standalone command
         known_ungrouped = {"tutorial"}
         actual_ungrouped = ungrouped - known_ungrouped
-
-        if actual_ungrouped:
-            pytest.warns(UserWarning, match="ungrouped")
-        # Soft check — warn but don't fail for now since some commands
-        # may intentionally be hidden from help
+        assert not actual_ungrouped, (
+            f"Defined commands missing from command_groups: {sorted(actual_ungrouped)}"
+        )
 
 
 # ── REPO_URL ─────────────────────────────────────────────────────────
@@ -246,4 +244,23 @@ class TestRepoLinks:
         """Manual command block should define REPO_URL."""
         manual_cmd = xts_data["manual"]["command"]
         assert "REPO_URL=" in manual_cmd, "REPO_URL variable not found in manual command"
-        assert "github.com" in manual_cmd, "GitHub URL not found in manual command"
+        assert "https://github.com/rdkcentral/xts_allocator_server" in manual_cmd, (
+            "Canonical rdkcentral GitHub URL not found in manual command"
+        )
+
+
+class TestLegacyCommandRegression:
+    """Prevent regressions to previously fixed broken command references."""
+
+    @pytest.mark.parametrize(
+        "removed_command",
+        [
+            "xts allocator test_heartbeat",
+            "xts allocator export_raft",
+            "xts allocator export_python_raft",
+        ],
+    )
+    def test_removed_commands_not_referenced(self, xts_raw, removed_command):
+        assert removed_command not in xts_raw, (
+            f"Found removed legacy command reference: {removed_command}"
+        )
