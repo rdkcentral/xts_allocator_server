@@ -3,7 +3,10 @@
 This document is the developer-facing tour of the allocator: what it is,
 what data it holds, what you can put into it, and what you can pull
 back out. Read [endpoints.md](./endpoints.md) for full request/response
-schemas of every route.
+schemas of every route, and [raft_integration.md](./raft_integration.md)
+for how the allocator feeds RAFT (`device.yaml` + `rackConfig.yaml`),
+the proposed v3 bundle schema, the `vts-element` permanent-plus-borrow
+pattern, and the optional monitor-during-test callback hook.
 
 ## Contents
 
