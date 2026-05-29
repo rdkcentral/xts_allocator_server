@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Database Status
+# Shows current database configuration and statistics
+
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+cd "$PROJECT_ROOT"
+source env.sh 2>/dev/null || true
+
+# Determine current mode and database
+MODE=${XTS_MODE:-development}
+DB_TYPE=${DB_TYPE:-sqlite}
+SQLITE_PATH=${SQLITE_DB_PATH:-xts_allocator.db}
+
+echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║${NC}  ${GREEN}XTS Allocator - Database Status${NC}                          ${BLUE}║${NC}"
+echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# Configuration
+echo -e "${YELLOW}Configuration:${NC}"
+echo -e "  Mode:           ${GREEN}$MODE${NC}"
+echo -e "  Database Type:  ${GREEN}$DB_TYPE${NC}"
+
+if [ "$DB_TYPE" = "sqlite" ]; then
+    echo -e "  Database File:  ${GREEN}$SQLITE_PATH${NC}"
+    
+    if [ -f "$SQLITE_PATH" ]; then
+        size=$(du -h "$SQLITE_PATH" | cut -f1)
+        echo -e "  File Size:      ${GREEN}$size${NC}"
+        echo -e "  Status:         ${GREEN}✓ Exists${NC}"
+    else
+        echo -e "  Status:         ${RED}✗ Not found${NC}"
+        exit 0
+    fi
+else
+    echo -e "  PostgreSQL:"
+    echo -e "    Host:         ${GREEN}${POSTGRES_HOST:-localhost}${NC}"
+    echo -e "    Port:         ${GREEN}${POSTGRES_PORT:-5432}${NC}"
+    echo -e "    Database:     ${GREEN}${POSTGRES_DB:-xts_allocator}${NC}"
+    echo -e "    User:         ${GREEN}${POSTGRES_USER:-xts_allocator}${NC}"
+fi
+
+echo ""
+
+# Statistics (only for SQLite currently accessible)
+if [ "$DB_TYPE" = "sqlite" ] && [ -f "$SQLITE_PATH" ]; then
+    echo -e "${YELLOW}Statistics:${NC}"
+    
+    export XTS_MODE=$MODE
+    export SQLITE_DB_PATH=$SQLITE_PATH
+    
+    python << 'PYEOF'
+from models import Device, Rack, AllocationHistory, TestExecution, SessionLocal
+from datetime import datetime, timedelta
+
+session = SessionLocal()
+try:
+    # Device counts
+    total_devices = session.query(Device).count()
+    free_devices = session.query(Device).filter_by(state="free").count()
+    allocated_devices = session.query(Device).filter_by(state="allocated").count()
+    testing_devices = session.query(Device).filter_by(state="testing").count()
+    
+    # Rack count
+    total_racks = session.query(Rack).count()
+    
+    # History
+    total_allocations = session.query(AllocationHistory).count()
+    active_allocations = session.query(AllocationHistory).filter(
+        AllocationHistory.end_time.is_(None)
+    ).count()
+    
+    # Tests
+    total_tests = session.query(TestExecution).count()
+    active_tests = session.query(TestExecution).filter(
+        TestExecution.end_time.is_(None)
+    ).count()
+    
+    # Recent activity
+    recent = datetime.utcnow() - timedelta(hours=24)
+    recent_allocations = session.query(AllocationHistory).filter(
+        AllocationHistory.start_time >= recent
+    ).count()
+    
+    print(f"  Racks:              {total_racks}")
+    print(f"  Devices:            {total_devices}")
+    print(f"    Free:             {free_devices}")
+    print(f"    Allocated:        {allocated_devices}")
+    print(f"    Testing:          {testing_devices}")
+    print(f"  ")
+    print(f"  Allocations:")
+    print(f"    Total:            {total_allocations}")
+    print(f"    Active:           {active_allocations}")
+    print(f"    Last 24h:         {recent_allocations}")
+    print(f"  ")
+    print(f"  Test Executions:")
+    print(f"    Total:            {total_tests}")
+    print(f"    Active:           {active_tests}")
+    
+except Exception as e:
+    print(f"  Error reading stats: {e}")
+finally:
+    session.close()
+PYEOF
+
+fi
+
+echo ""
+
+# Server status
+echo -e "${YELLOW}Server Status:${NC}"
+if pgrep -f "python.*app.py" > /dev/null; then
+    PID=$(pgrep -f "python.*app.py")
+    echo -e "  Status:         ${GREEN}✓ Running${NC}"
+    echo -e "  PID:            ${GREEN}$PID${NC}"
+    
+    # Try to get metrics
+    if curl -s http://localhost:5000/health > /dev/null 2>&1; then
+        echo -e "  Health:         ${GREEN}✓ Healthy${NC}"
+        echo -e "  URL:            ${BLUE}http://localhost:5000${NC}"
+    fi
+else
+    echo -e "  Status:         ${YELLOW}✗ Not running${NC}"
+fi
+
+echo ""
+
+# Quick actions
+echo -e "${YELLOW}Quick Actions:${NC}"
+echo -e "  Switch to test:    ${BLUE}bin/db-switch test${NC}"
+echo -e "  Reset test DB:     ${BLUE}bin/db-clean test-reset${NC}"
+echo -e "  Clear devices:     ${BLUE}bin/db-clean clear-devices${NC}"
+echo -e "  View dashboard:    ${BLUE}http://localhost:5000/dashboard${NC}"
+
+echo ""

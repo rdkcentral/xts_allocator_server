@@ -1,5 +1,17 @@
+bin/xts_allocator
 *.lastlogin
 *__pycache__*
 *.vscode*
 *build*
 *.egg*
+venv/
+.venv/
+*.pyc
+*.db
+xts_allocator.db
+*.log
+
+# Development dependencies (cloned separately for integrated development)
+3rdParty/
+
+logs/

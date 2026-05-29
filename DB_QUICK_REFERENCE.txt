@@ -1,0 +1,74 @@
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                              ┃
+┃   XTS ALLOCATOR - DATABASE MANAGEMENT QUICK REFERENCE        ┃
+┃                                                              ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DATABASE MODES:
+  
+  test         xts_allocator_test.db    Safe to rebuild/clean
+  development  xts_allocator.db         Your working database  
+  production   PostgreSQL/SQLite        Protected production data
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ESSENTIAL COMMANDS:
+
+Check Status:
+  bin/db-status                 Current mode & stats
+
+Switch Modes:
+  bin/db-switch test            Switch to test database
+  bin/db-switch development     Switch to development  
+  bin/db-switch production      Switch to production
+
+Clean Test DB:
+  bin/db-clean test-reset       Rebuild from scratch
+  bin/db-clean clear-devices    Remove all devices
+  bin/db-clean clear-history    Clear allocation history
+  bin/db-clean clear-all        Clear everything
+
+Run Tests:
+  ./test-safe.sh                Use test database automatically
+  ./test.sh                     Original test runner
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TYPICAL WORKFLOWS:
+
+Development:
+  $ ./run.sh                    # Start server (development DB)
+  $ # ... work on features ...
+  $ ./stop.sh
+
+API Testing:
+  $ bin/db-switch test          # Switch to test mode
+  $ bin/db-clean test-reset -f  # Clean slate
+  $ ./run.sh                    # Start with test DB
+  $ # ... test API ...
+  $ bin/db-switch development   # Back to development
+
+Automated Testing:
+  $ export XTS_MODE=test        # Set test mode
+  $ ./test-safe.sh              # Run tests safely
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SAFETY:
+
+✓ Clean commands default to TEST database only
+✓ Confirmation prompts for destructive operations  
+✓ Production data protected from accidents
+✓ Use --force flag to override (use carefully!)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DOCUMENTATION:
+
+  DATABASE_MANAGEMENT.md        Complete guide
+  README.md                     Quick start
+  test/demo_db_management.sh    Working example
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
