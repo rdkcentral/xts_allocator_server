@@ -1,0 +1,1365 @@
+#****************************************************************************
+# *
+# * If not stated otherwise in this file or this component's LICENSE file
+# * the following copyright and licenses apply:
+# *
+# * Copyright 2026 RDK Management
+# *
+# * Licensed under the Apache License, Version 2.0 (the "License");
+# * you may not use this file except in compliance with the License.
+# * You may obtain a copy of the License at
+# *
+# *
+# * http://www.apache.org/licenses/LICENSE-2.0
+# *
+# * Unless required by applicable law or agreed to in writing, software
+# * distributed under the License is distributed on an "AS IS" BASIS,
+# * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# * See the License for the specific language governing permissions and
+# * limitations under the License.
+# *
+#****************************************************************************
+
+# XTS Allocator Commands
+# 
+# Architecture:
+#   - Server returns JSON only (no formatting)
+#   - This .xts file contains all presentation logic (inline Python formatters)
+#   - Server can upgrade capabilities independently of client
+#   - No external file dependencies - everything self-contained
+#
+# Quick Start:
+#   1. Register server: xts alias add allocator http://server:5000/xts_allocator.xts
+#   2. List devices:    xts allocator list
+#   3. Allocate:        xts allocator alloc_by_id you@example.com 5 2h
+#   4. Release:         xts allocator release you@example.com 5
+#
+# Environment Variables:
+#   XTS_ALLOCATOR_SERVER - Override server URL (default: http://localhost:5000)
+#   XTS_ALLOCATOR_TOKEN - Engineer/admin JWT for protected test commands
+#   XTS_ALLOCATOR_ADMIN_TOKEN - Admin JWT for state changes (falls back to XTS_ALLOCATOR_TOKEN)
+#   XTS_ALLOCATOR_USER_EMAIL - Optional user email attached to start_test requests
+#   XTS_ALLOCATOR_USER_NAME - Optional display name used for allocations
+#   XTS_ALLOCATOR_USER_OFFICE - Optional office/site tag for user profile
+#   XTS_ALLOCATOR_USER_TEAM - Optional team/project tag for user profile
+#   XTS_ALLOCATOR_PROFILE_DIR - Profile directory (default: ~/.xts/config/allocators)
+#   XTS_ALLOCATOR_INSTANCE - Instance/profile key (default: $XTS_ALIAS_NAME or 'allocator')
+#   XTS_ALLOCATOR_PROFILE - Explicit profile path override
+#   XTS_ALIAS_NAME - Auto-set by xts_core when running via alias
+#
+# Duration Format:
+#   30m  = 30 minutes
+#   2h   = 2 hours
+#   90   = 90 minutes (plain number)
+
+brief: "Allocator box orchestration commands for XTS (search, allocate, state, test lifecycle)"
+alias_name: "allocator"
+
+# Command groups for organized display (user-facing vs test automation)
+command_groups:
+  user_commands:
+    title: "User Commands"
+    description: "Commands for human users"
+    commands:
+      - list
+      - list_free
+      - list_allocated
+      - list_by_platform
+      - list_targets
+      - list_racks
+      - search_boxes
+      - search_by_platform
+      - search_by_rack
+      - search_by_tags
+      - search_by_label
+      - search_by_equipment
+      - describe_box
+      - alloc
+      - alloc_by_id
+      - alloc_by_platform
+      - alloc_by_tags
+      - alloc_by_target
+      - release
+      - release_me
+      - borrow_box
+      - return_borrow_box
+      - help_commands
+      - tutorial
+      - whoami
+      - register
+      - xts_allocator_register
+  test_automation:
+    title: "Test Automation"
+    description: "Commands for test scripts and automation"
+    commands:
+      - status
+      - report_heartbeat
+      - start_test
+      - heartbeat_test
+      - heartbeat_device
+      - active_test
+      - list_active_tests
+      - end_test
+      - get_state
+      - set_state
+      - valid_states
+      - box_heartbeat
+      - annotate_box
+      - label_box
+      - set_slot_contents
+
+# Shared formatter functions (reusable via {{function_name}} syntax)
+functions:
+  format_device_list:
+    description: Format device list from slots array (list endpoints)
+    command: |
+      python3 -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      slots = data.get('slots', [])
+      if not slots:
+          print('\\033[93mNo devices found.\\033[0m')
+          sys.exit(0)
+      print(f'\\n\\033[1m\\033[96mDevice List ({len(slots)} devices):\\033[0m\\n')
+      print('\\033[1m%-4s %-38s %-12s %-18s %-8s\\033[0m' % ('ID', 'Target', 'State', 'Labels', 'Eq#'))
+      print('─' * 90)
+      for s in slots:
+          sid = str(s.get('slot_id', '?'))[:4]
+          target = s.get('target_id') or f\"{s.get('platform', 'unknown')}@{s.get('rackName', '-')}/{s.get('slotName', '-')}\" 
+          target = target[:38]
+          state = s.get('state', 'unknown')
+          labels = ','.join(s.get('labels') or s.get('tags') or [])[:18] or '-'
+          equipment_count = len(s.get('slot_contents') or s.get('external_equipment') or [])
+          sc = '\\033[92m' if state == 'free' else ('\\033[93m' if state == 'allocated' else '\\033[0m')
+          print('\\033[96m%-4s\\033[0m %-38s %s%-12s\\033[0m %-18s %-8s' % (sid, target, sc, state, labels, equipment_count))
+      print('\\n' + '─' * 90)
+      print('\\033[2mUse xts allocator describe_box <id|target> for full box/rack-slot details\\033[0m')
+      free = sum(1 for s in slots if s.get('state') == 'free')
+      alloc = sum(1 for s in slots if s.get('state') == 'allocated')
+      print(f'\\n\\033[1mSummary:\\033[0m \\033[92m{free} free\\033[0m, \\033[93m{alloc} allocated\\033[0m')
+      "
+  
+  format_search_results:
+    description: Format device list from results array (search endpoints)
+    command: |
+      python3 -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      results = data.get('results', [])
+      if not results:
+          print('\\033[93mNo devices found.\\033[0m')
+          sys.exit(0)
+      print(f'\\n\\033[1m\\033[96mDevice List ({len(results)} devices):\\033[0m\\n')
+      print('\\033[1m%-4s %-38s %-12s %-18s %-8s\\033[0m' % ('ID', 'Target', 'State', 'Labels', 'Eq#'))
+      print('─' * 90)
+      for r in results:
+          sid = str(r.get('id', '?'))[:4]
+          target = r.get('target_id') or f\"{r.get('platform', 'unknown')}@{r.get('rack_name', '-')}/{r.get('slot_name', '-')}\" 
+          target = target[:38]
+          state = r.get('state', 'unknown')
+          labels = ','.join(r.get('labels') or r.get('tags') or [])[:18] or '-'
+          equipment_count = len(r.get('slot_contents') or r.get('external_equipment') or [])
+          sc = '\\033[92m' if state == 'free' else ('\\033[93m' if state == 'allocated' else '\\033[0m')
+          print('\\033[96m%-4s\\033[0m %-38s %s%-12s\\033[0m %-18s %-8s' % (sid, target, sc, state, labels, equipment_count))
+      print('\\n' + '─' * 90)
+      print('\\033[2mUse xts allocator describe_box <id|target> for full box/rack-slot details\\033[0m')
+      free = sum(1 for r in results if r.get('state') == 'free')
+      alloc = sum(1 for r in results if r.get('state') == 'allocated')
+      print(f'\\n\\033[1mSummary:\\033[0m \\033[92m{free} free\\033[0m, \\033[93m{alloc} allocated\\033[0m')
+      "
+  
+  format_rack_list:
+    description: Format rack list
+    command: |
+      python3 -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      racks = data.get('racks', [])
+      if not racks:
+          print('\\033[93mNo racks found.\\033[0m')
+          sys.exit(0)
+      print(f'\\n\\033[1m\\033[96mRack List ({len(racks)} racks):\\033[0m\\n')
+      print('\\033[1m%-20s %-25s %-20s %-10s\\033[0m' % ('Name', 'Location', 'Building', 'Devices'))
+      print('─' * 80)
+      for r in racks:
+          name = r.get('name', 'Unknown')[:20]
+          loc = r.get('location', '-')[:25]
+          bld = r.get('building', '-')[:20]
+          cnt = r.get('device_count', 0)
+          print('\\033[96m%-20s\\033[0m %-25s %-20s %-10s' % (name, loc, bld, cnt))
+      print()
+      "
+
+tutorial:
+  description: |
+    Show allocator onboarding and common workflows
+
+    Usage: xts allocator tutorial
+  command: |
+    ALLOCATOR_INSTANCE="${XTS_ALLOCATOR_INSTANCE:-${XTS_ALIAS_NAME:-allocator}}"
+    PROFILE_DIR="${XTS_ALLOCATOR_PROFILE_DIR:-$HOME/.xts/config/allocators}"
+    PROFILE_PATH="${XTS_ALLOCATOR_PROFILE:-${PROFILE_DIR}/${ALLOCATOR_INSTANCE}.env}"
+    SERVER="${XTS_ALLOCATOR_SERVER:-http://localhost:5000}"
+    echo ""
+    echo "\033[1m\033[96mXTS Allocator Tutorial\033[0m"
+    echo "==============================================="
+    echo ""
+    echo "\033[1m1) Connect to server alias\033[0m"
+    echo "   xts alias add allocator ${SERVER}/xts_allocator.xts"
+    echo ""
+    echo "\033[1m2) Register local user profile (interactive)\033[0m"
+    echo "   xts allocator register"
+    echo "   xts allocator xts_allocator_register"
+    echo "   - pulls git user.name / user.email defaults if available"
+    echo "   - stores per-instance profile in ${PROFILE_PATH}"
+    echo ""
+    echo "\033[1m3) Verify connectivity\033[0m"
+    echo "   xts allocator status"
+    echo "   xts allocator whoami"
+    echo ""
+    echo "\033[1m4) Find and allocate a box\033[0m"
+    echo "   xts allocator list llama --free"
+    echo "   xts allocator alloc llama 2h"
+    echo "   xts allocator alloc Cisco@TestRack1/Slot1 2h"
+    echo ""
+    echo "\033[1m5) Manage state and test lifecycle\033[0m"
+    echo "   xts allocator get_state 5"
+    echo "   xts allocator set_state 5 maintenance"
+    echo "   xts allocator start_test 5 smoke_boot 20"
+    echo "   xts allocator box_heartbeat 5"
+    echo ""
+    echo "\033[1m6) Borrow and return desk boxes\033[0m"
+    echo "   xts allocator borrow_box 5 2h \"owner away\""
+    echo "   xts allocator return_borrow_box 5"
+    echo ""
+
+register:
+  description: |
+    Interactive user registration/profile setup for allocator commands.
+    Pulls defaults from git config if available and asks before using them.
+
+    Usage: xts allocator register [instance]
+
+    Examples:
+      xts allocator register
+      xts allocator register lab_london
+  command: |
+    INSTANCE_ARG="${1:-}"
+    ALLOCATOR_INSTANCE="${XTS_ALLOCATOR_INSTANCE:-${XTS_ALIAS_NAME:-allocator}}"
+    if [ -n "$INSTANCE_ARG" ] && [ "${INSTANCE_ARG#-}" = "$INSTANCE_ARG" ]; then
+      ALLOCATOR_INSTANCE="$INSTANCE_ARG"
+    fi
+    PROFILE_DIR="${XTS_ALLOCATOR_PROFILE_DIR:-$HOME/.xts/config/allocators}"
+    PROFILE_PATH="${XTS_ALLOCATOR_PROFILE:-${PROFILE_DIR}/${ALLOCATOR_INSTANCE}.env}"
+    SERVER_DEFAULT="${XTS_ALLOCATOR_SERVER:-http://localhost:5000}"
+
+    if [ -f "$PROFILE_PATH" ]; then
+      # shellcheck disable=SC1090
+      . "$PROFILE_PATH"
+      SERVER_DEFAULT="${XTS_ALLOCATOR_SERVER:-$SERVER_DEFAULT}"
+    fi
+
+    EXISTING_EMAIL="${XTS_ALLOCATOR_USER_EMAIL:-}"
+    EXISTING_NAME="${XTS_ALLOCATOR_USER_NAME:-}"
+    EXISTING_OFFICE="${XTS_ALLOCATOR_USER_OFFICE:-}"
+    EXISTING_TEAM="${XTS_ALLOCATOR_USER_TEAM:-}"
+
+    GIT_EMAIL="$(git config --get user.email 2>/dev/null || true)"
+    GIT_NAME="$(git config --get user.name 2>/dev/null || true)"
+
+    if [ -n "$GIT_EMAIL$GIT_NAME" ]; then
+      echo ""
+      echo "Found git config defaults:"
+      [ -n "$GIT_NAME" ] && echo "  git user.name  = $GIT_NAME"
+      [ -n "$GIT_EMAIL" ] && echo "  git user.email = $GIT_EMAIL"
+      read -r -p "Use git defaults for name/email? [Y/n]: " USE_GIT_DEFAULTS
+      case "$USE_GIT_DEFAULTS" in
+        ""|y|Y|yes|YES)
+          [ -z "$EXISTING_NAME" ] && EXISTING_NAME="$GIT_NAME"
+          [ -z "$EXISTING_EMAIL" ] && EXISTING_EMAIL="$GIT_EMAIL"
+          ;;
+      esac
+    fi
+
+    echo ""
+    read -r -p "User email [${EXISTING_EMAIL:-}]: " INPUT_EMAIL
+    USER_EMAIL="${INPUT_EMAIL:-$EXISTING_EMAIL}"
+    read -r -p "User name [${EXISTING_NAME:-}]: " INPUT_NAME
+    USER_NAME="${INPUT_NAME:-$EXISTING_NAME}"
+    read -r -p "Office/site [${EXISTING_OFFICE:-}]: " INPUT_OFFICE
+    USER_OFFICE="${INPUT_OFFICE:-$EXISTING_OFFICE}"
+    read -r -p "Team/project [${EXISTING_TEAM:-}]: " INPUT_TEAM
+    USER_TEAM="${INPUT_TEAM:-$EXISTING_TEAM}"
+    read -r -p "Allocator server URL [${SERVER_DEFAULT}]: " INPUT_SERVER
+    USER_SERVER="${INPUT_SERVER:-$SERVER_DEFAULT}"
+
+    if [ -z "$USER_EMAIL" ]; then
+      echo "Error: user email is required."
+      exit 1
+    fi
+    if ! printf '%s' "$USER_EMAIL" | grep -Eq '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'; then
+      echo "Error: user email format is invalid: $USER_EMAIL"
+      exit 1
+    fi
+
+    export XTS_ALLOCATOR_SERVER="$USER_SERVER"
+    export XTS_ALLOCATOR_USER_EMAIL="$USER_EMAIL"
+    export XTS_ALLOCATOR_USER_NAME="$USER_NAME"
+    export XTS_ALLOCATOR_USER_OFFICE="$USER_OFFICE"
+    export XTS_ALLOCATOR_USER_TEAM="$USER_TEAM"
+    export XTS_ALLOCATOR_INSTANCE="$ALLOCATOR_INSTANCE"
+
+    mkdir -p "$(dirname "$PROFILE_PATH")"
+    python3 - "$PROFILE_PATH" <<'PY'
+    import datetime
+    import os
+    import pathlib
+    import sys
+
+    profile_path = pathlib.Path(sys.argv[1])
+    keys = [
+        "XTS_ALLOCATOR_INSTANCE",
+        "XTS_ALLOCATOR_SERVER",
+        "XTS_ALLOCATOR_USER_EMAIL",
+        "XTS_ALLOCATOR_USER_NAME",
+        "XTS_ALLOCATOR_USER_OFFICE",
+        "XTS_ALLOCATOR_USER_TEAM",
+        "XTS_ALLOCATOR_TOKEN",
+        "XTS_ALLOCATOR_ADMIN_TOKEN",
+    ]
+
+    existing = {}
+    if profile_path.exists():
+        for line in profile_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("export ") and "=" in line:
+                left, right = line[len("export "):].split("=", 1)
+                existing[left.strip()] = right.strip()
+
+    lines = []
+    lines.append("# XTS Allocator profile")
+    lines.append(f"# Updated: {datetime.datetime.utcnow().isoformat()}Z")
+    for key in keys:
+        value = os.environ.get(key)
+        if value is None:
+            rendered = existing.get(key, "")
+            if rendered:
+                lines.append(f"export {key}={rendered}")
+            continue
+        lines.append(f"export {key}={value!r}")
+
+    profile_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    PY
+    chmod 600 "$PROFILE_PATH" 2>/dev/null || true
+
+    echo ""
+    echo "Instance: $ALLOCATOR_INSTANCE"
+    echo "Profile saved: $PROFILE_PATH"
+    echo "Current shell updated."
+    echo ""
+    echo "Recommended:"
+    echo "  source \"$PROFILE_PATH\""
+    echo "  xts allocator whoami"
+    echo ""
+  params:
+    passthrough: true
+
+xts_allocator_register:
+  description: |
+    Explicit register command alias (same as 'register').
+
+    Usage: xts allocator xts_allocator_register [instance]
+  command: |
+    xts ${XTS_ALIAS_NAME:-allocator} register "$@"
+  params:
+    passthrough: true
+
+whoami:
+  description: |
+    Show current allocator identity/profile values.
+
+    Usage: xts allocator whoami
+  command: |
+    ALLOCATOR_INSTANCE="${XTS_ALLOCATOR_INSTANCE:-${XTS_ALIAS_NAME:-allocator}}"
+    PROFILE_DIR="${XTS_ALLOCATOR_PROFILE_DIR:-$HOME/.xts/config/allocators}"
+    PROFILE_PATH="${XTS_ALLOCATOR_PROFILE:-${PROFILE_DIR}/${ALLOCATOR_INSTANCE}.env}"
+    if [ -f "$PROFILE_PATH" ]; then
+      # shellcheck disable=SC1090
+      . "$PROFILE_PATH"
+    fi
+    echo "{"
+    echo "  \"server\": \"${XTS_ALLOCATOR_SERVER:-http://localhost:5000}\","
+    echo "  \"email\": \"${XTS_ALLOCATOR_USER_EMAIL:-}\","
+    echo "  \"name\": \"${XTS_ALLOCATOR_USER_NAME:-}\","
+    echo "  \"office\": \"${XTS_ALLOCATOR_USER_OFFICE:-}\","
+    echo "  \"team\": \"${XTS_ALLOCATOR_USER_TEAM:-}\","
+    echo "  \"instance\": \"${XTS_ALLOCATOR_INSTANCE:-$ALLOCATOR_INSTANCE}\","
+    echo "  \"profile\": \"$PROFILE_PATH\""
+    echo "}"
+
+help_commands:
+  description: |
+    Show command catalog with descriptions and known switches.
+    Useful when shell completion cannot display descriptions inline.
+
+    Usage: xts allocator help_commands
+  command: |
+    CONFIG_PATH="${XTS_CONFIG_PATH:-${XTS_ALIAS_SOURCE:-}}"
+    if [ -z "$CONFIG_PATH" ] || [ ! -f "$CONFIG_PATH" ]; then
+      ALIAS_NAME="${XTS_ALIAS_NAME:-allocator}"
+      ALIASES_FILE="$HOME/.xts/aliases.json"
+      if [ -f "$ALIASES_FILE" ]; then
+        CANDIDATE_PATH="$(python3 - "$ALIASES_FILE" "$ALIAS_NAME" <<'PY'
+    import json
+    import sys
+
+    aliases_file = sys.argv[1]
+    alias_name = sys.argv[2]
+    try:
+        with open(aliases_file, "r", encoding="utf-8") as f:
+            aliases = json.load(f) or {}
+        value = aliases.get(alias_name, "")
+        if isinstance(value, str):
+            print(value)
+    except Exception:
+        pass
+    PY
+        )"
+        if [ -n "$CANDIDATE_PATH" ] && [ -f "$CANDIDATE_PATH" ]; then
+          CONFIG_PATH="$CANDIDATE_PATH"
+        fi
+      fi
+    fi
+    if [ -z "$CONFIG_PATH" ] || [ ! -f "$CONFIG_PATH" ]; then
+      for candidate in "./xts_allocator.xts" "./config/xts_allocator.xts"; do
+        if [ -f "$candidate" ]; then
+          CONFIG_PATH="$candidate"
+          break
+        fi
+      done
+    fi
+    if [ -z "$CONFIG_PATH" ] || [ ! -f "$CONFIG_PATH" ]; then
+      echo "Unable to read config metadata (XTS_CONFIG_PATH not set)."
+      echo "Use: xts ${XTS_ALIAS_NAME:-allocator} --help"
+      exit 0
+    fi
+    python3 - "$CONFIG_PATH" <<'PY'
+    import re
+    import sys
+    import yaml
+
+    cfg_path = sys.argv[1]
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if isinstance(data.get("commands"), dict):
+        commands = data["commands"]
+    else:
+        reserved = {"brief", "schema_version", "version", "changelog", "functions", "commands", "command_groups"}
+        commands = {k: v for k, v in data.items() if isinstance(v, dict) and "command" in v and k not in reserved}
+
+    command_groups = data.get("command_groups", {})
+    
+    print("\n\033[1musage:\033[0m xts allocator <command> [options]\n")
+    
+    # Display grouped commands if groups are defined
+    if command_groups:
+        first_group = True
+        for group_key, group_data in command_groups.items():
+            # Add spacing between groups
+            if not first_group:
+                print()
+            first_group = False
+            
+            title = group_data.get("title", group_key)
+            description = group_data.get("description", "")
+            group_commands = group_data.get("commands", [])
+            
+            print(f"\033[1m\033[33m{title.lower()}:\033[0m")
+            if description:
+                print(f"  \033[2m{description}\033[0m")
+            print()
+            
+            for cmd_name in group_commands:
+                if cmd_name in commands:
+                    details = commands[cmd_name] or {}
+                    desc = str(details.get("description", "")).strip().splitlines()[0] if details.get("description") else ""
+                    # Clean up description - remove common prefix patterns
+                    import re
+                    desc = re.sub(r'^Usage:\s*xts\s+\w+\s+\w+.*', '', desc, flags=re.IGNORECASE).strip()
+                    if desc:
+                        print(f"  \033[1;32m{cmd_name:28}\033[0m \033[2m{desc}\033[0m")
+        print()
+    else:
+        # Fallback to alphabetical list if no groups
+        print("\033[1m\033[96mAllocator Commands\033[0m\n")
+        for name in sorted(commands.keys()):
+            details = commands.get(name, {}) or {}
+            desc = str(details.get("description", "")).strip().splitlines()[0] if details.get("description") else ""
+            print(f"\033[1;32m{name:26}\033[0m \033[2m{desc}\033[0m")
+        print()
+    PY
+
+alloc:
+  description: |
+    Allocate using registered profile identity (email/name/office/team).
+    Target can be numeric device id, target_id (platform@rack/slot), or platform.
+
+    Usage: xts allocator alloc <target> <duration>
+
+    Examples:
+      xts allocator alloc 5 2h
+      xts allocator alloc Cisco@TestRack1/Slot1 2h
+      xts allocator alloc llama 90m
+  command: |
+    ALLOCATOR_INSTANCE="${XTS_ALLOCATOR_INSTANCE:-${XTS_ALIAS_NAME:-allocator}}"
+    PROFILE_DIR="${XTS_ALLOCATOR_PROFILE_DIR:-$HOME/.xts/config/allocators}"
+    PROFILE_PATH="${XTS_ALLOCATOR_PROFILE:-${PROFILE_DIR}/${ALLOCATOR_INSTANCE}.env}"
+    if [ -f "$PROFILE_PATH" ]; then
+      # shellcheck disable=SC1090
+      . "$PROFILE_PATH"
+    fi
+    if [ -z "${XTS_ALLOCATOR_USER_EMAIL:-}" ]; then
+      echo "Error: no registered user email."
+      echo "Run: xts allocator register"
+      exit 1
+    fi
+    TARGET="$1"
+    DURATION="$2"
+    PAYLOAD=$(TARGET="$TARGET" DURATION="$DURATION" python3 -c "import json, os; target=os.environ['TARGET']; duration=os.environ['DURATION']; slot={}; user={'email': os.environ.get('XTS_ALLOCATOR_USER_EMAIL','')}; name=os.environ.get('XTS_ALLOCATOR_USER_NAME','').strip(); office=os.environ.get('XTS_ALLOCATOR_USER_OFFICE','').strip(); team=os.environ.get('XTS_ALLOCATOR_USER_TEAM','').strip(); user.update({'name': name} if name else {}); user.update({'office': office} if office else {}); user.update({'team': team} if team else {}); slot.update({'id': int(target)} if target.isdigit() else ({'target_id': target} if ('@' in target or '/' in target) else {'platform': target})); print(json.dumps({'user': user, 'slot': slot, 'duration': duration}))")
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+release_me:
+  description: |
+    Release device using registered profile email.
+
+    Usage: xts allocator release_me <device_id>
+
+    Example:
+      xts allocator release_me 5
+  command: |
+    ALLOCATOR_INSTANCE="${XTS_ALLOCATOR_INSTANCE:-${XTS_ALIAS_NAME:-allocator}}"
+    PROFILE_DIR="${XTS_ALLOCATOR_PROFILE_DIR:-$HOME/.xts/config/allocators}"
+    PROFILE_PATH="${XTS_ALLOCATOR_PROFILE:-${PROFILE_DIR}/${ALLOCATOR_INSTANCE}.env}"
+    if [ -f "$PROFILE_PATH" ]; then
+      # shellcheck disable=SC1090
+      . "$PROFILE_PATH"
+    fi
+    if [ -z "${XTS_ALLOCATOR_USER_EMAIL:-}" ]; then
+      echo "Error: no registered user email."
+      echo "Run: xts allocator register"
+      exit 1
+    fi
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/deallocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"${XTS_ALLOCATOR_USER_EMAIL}\"}, \"slot\": {\"id\": $1}}"
+  params:
+    passthrough: true
+
+borrow_box:
+  description: |
+    Borrow a box temporarily when the default owner is unavailable.
+    Works for allocated/permanent boxes that are not actively testing.
+
+    Usage: xts allocator borrow_box <device_id> [duration] [reason]
+
+    Examples:
+      xts allocator borrow_box 5
+      xts allocator borrow_box 5 2h
+      xts allocator borrow_box 5 90m "owner away this week"
+  command: |
+    ALLOCATOR_INSTANCE="${XTS_ALLOCATOR_INSTANCE:-${XTS_ALIAS_NAME:-allocator}}"
+    PROFILE_DIR="${XTS_ALLOCATOR_PROFILE_DIR:-$HOME/.xts/config/allocators}"
+    PROFILE_PATH="${XTS_ALLOCATOR_PROFILE:-${PROFILE_DIR}/${ALLOCATOR_INSTANCE}.env}"
+    if [ -f "$PROFILE_PATH" ]; then
+      # shellcheck disable=SC1090
+      . "$PROFILE_PATH"
+    fi
+    if [ -z "${XTS_ALLOCATOR_USER_EMAIL:-}" ]; then
+      echo "Error: no registered user email."
+      echo "Run: xts allocator register"
+      exit 1
+    fi
+    DURATION="${2:-4h}"
+    REASON="${3:-owner unavailable}"
+    if [ "$#" -gt 3 ]; then
+      REASON="$3 ${*:4}"
+    fi
+    PAYLOAD=$(SLOT_ID="$1" DURATION="$DURATION" REASON="$REASON" python3 -c "import json, os; u={'email': os.environ.get('XTS_ALLOCATOR_USER_EMAIL','')}; name=os.environ.get('XTS_ALLOCATOR_USER_NAME','').strip(); u.update({'name': name} if name else {}); print(json.dumps({'user': u, 'slot': {'id': int(os.environ['SLOT_ID'])}, 'duration': os.environ['DURATION'], 'reason': os.environ['REASON']}))")
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/borrow_slot \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+return_borrow_box:
+  description: |
+    Return a borrowed box to its original owner.
+
+    Usage: xts allocator return_borrow_box <device_id>
+
+    Example:
+      xts allocator return_borrow_box 5
+  command: |
+    ALLOCATOR_INSTANCE="${XTS_ALLOCATOR_INSTANCE:-${XTS_ALIAS_NAME:-allocator}}"
+    PROFILE_DIR="${XTS_ALLOCATOR_PROFILE_DIR:-$HOME/.xts/config/allocators}"
+    PROFILE_PATH="${XTS_ALLOCATOR_PROFILE:-${PROFILE_DIR}/${ALLOCATOR_INSTANCE}.env}"
+    if [ -f "$PROFILE_PATH" ]; then
+      # shellcheck disable=SC1090
+      . "$PROFILE_PATH"
+    fi
+    if [ -z "${XTS_ALLOCATOR_USER_EMAIL:-}" ]; then
+      echo "Error: no registered user email."
+      echo "Run: xts allocator register"
+      exit 1
+    fi
+    PAYLOAD=$(SLOT_ID="$1" python3 -c "import json, os; u={'email': os.environ.get('XTS_ALLOCATOR_USER_EMAIL','')}; name=os.environ.get('XTS_ALLOCATOR_USER_NAME','').strip(); u.update({'name': name} if name else {}); print(json.dumps({'user': u, 'slot': {'id': int(os.environ['SLOT_ID'])}}))")
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/return_borrowed_slot \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+alloc_by_id:
+  description: |
+    Allocate device by specific ID
+    
+    Usage: xts allocator alloc_by_id <email> <device_id> <duration>
+    
+    Examples:
+      xts allocator alloc_by_id user@example.com 5 2h
+      xts allocator alloc_by_id test@dev.com 1 30m
+      xts allocator alloc_by_id admin@test.com 10 90
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"id\": $2}, \"duration\": \"$3\"}"
+  params:
+    passthrough: true
+
+alloc_by_platform:
+  description: |
+    Allocate first available device matching platform
+    
+    Usage: xts allocator alloc_by_platform <email> <platform> <duration>
+    
+    Examples:
+      xts allocator alloc_by_platform user@example.com alpha.uk 2h
+      xts allocator alloc_by_platform test@dev.com beta.us 1h
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"platform\": \"$2\"}, \"duration\": \"$3\"}"
+  params:
+    passthrough: true
+
+alloc_by_target:
+  description: |
+    Allocate by unified target id (platform@rack/slot).
+    Resolution order: exact rack/slot (optionally platform-qualified), then platform fallback.
+
+    Usage: xts allocator alloc_by_target <email> <target_id> <duration>
+
+    Examples:
+      xts allocator alloc_by_target user@example.com Cisco@TestRack1/Slot1 2h
+      xts allocator alloc_by_target user@example.com TestRack1/Slot1 2h
+      xts allocator alloc_by_target user@example.com Cisco 2h
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"target_id\": \"$2\"}, \"duration\": \"$3\"}"
+  params:
+    passthrough: true
+
+alloc_by_tags:
+  description: |
+    Allocate first available device matching tags
+    
+    Usage: xts allocator alloc_by_tags <email> <tags> <duration>
+    
+    Examples:
+      xts allocator alloc_by_tags user@example.com hdmi,4k 2h
+      xts allocator alloc_by_tags test@dev.com production 1h
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/allocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"tags\": [\"$2\"]}, \"duration\": \"$3\"}"
+  params:
+    passthrough: true
+
+release:
+  description: |
+    Release an allocated device
+    
+    Usage: xts allocator release <email> <device_id>
+    
+    Examples:
+      xts allocator release user@example.com 5
+      xts allocator release test@dev.com 1
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/deallocate_slot \
+      -H "Content-Type: application/json" \
+      -d "{\"user\": {\"email\": \"$1\"}, \"slot\": {\"id\": $2}}"
+  params:
+    passthrough: true
+
+label_box:
+  description: |
+    Add/update labels for a box (labels are aliases of tags)
+
+    Usage: xts allocator label_box <slot_id> <labels_csv>
+
+    Examples:
+      xts allocator label_box 5 camera,ir,fan
+      xts allocator label_box 8 pi4,amp,hdmi
+  command: |
+    if [ -z "${XTS_ALLOCATOR_TOKEN:-}" ]; then
+      echo "Error: label_box requires XTS_ALLOCATOR_TOKEN."
+      exit 1
+    fi
+    LABELS_JSON=$(python3 -c "import json,sys; print(json.dumps([x.strip() for x in sys.argv[1].split(',') if x.strip()]))" "$2")
+    PAYLOAD=$(printf '{"slot_id": %s, "labels": %s}' "$1" "$LABELS_JSON")
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/update_slot \
+      -H "Authorization: Bearer ${XTS_ALLOCATOR_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+set_slot_contents:
+  description: |
+    Define what is physically in the rack slot (stored as external_equipment)
+
+    Usage: xts allocator set_slot_contents <slot_id> <contents_csv>
+
+    Examples:
+      xts allocator set_slot_contents 5 pi4,amp,fan,camera,IR Blaster Ollemxi
+      xts allocator set_slot_contents 8 camera,relay,power_controller
+  command: |
+    if [ -z "${XTS_ALLOCATOR_TOKEN:-}" ]; then
+      echo "Error: set_slot_contents requires XTS_ALLOCATOR_TOKEN."
+      exit 1
+    fi
+    CONTENTS_JSON=$(python3 -c "import json,sys; print(json.dumps([x.strip() for x in sys.argv[1].split(',') if x.strip()]))" "$2")
+    PAYLOAD=$(printf '{"slot_id": %s, "slot_contents": %s}' "$1" "$CONTENTS_JSON")
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/update_slot \
+      -H "Authorization: Bearer ${XTS_ALLOCATOR_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+annotate_box:
+  description: |
+    Set labels and slot contents in one command
+
+    Usage: xts allocator annotate_box <slot_id> <labels_csv> <contents_csv>
+
+    Example:
+      xts allocator annotate_box 5 camera,ir,fan pi4,amp,fan,camera,IR Blaster Ollemxi
+  command: |
+    if [ -z "${XTS_ALLOCATOR_TOKEN:-}" ]; then
+      echo "Error: annotate_box requires XTS_ALLOCATOR_TOKEN."
+      exit 1
+    fi
+    LABELS_JSON=$(python3 -c "import json,sys; print(json.dumps([x.strip() for x in sys.argv[1].split(',') if x.strip()]))" "$2")
+    CONTENTS_JSON=$(python3 -c "import json,sys; print(json.dumps([x.strip() for x in sys.argv[1].split(',') if x.strip()]))" "$3")
+    PAYLOAD=$(printf '{"slot_id": %s, "labels": %s, "slot_contents": %s}' "$1" "$LABELS_JSON" "$CONTENTS_JSON")
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/update_slot \
+      -H "Authorization: Bearer ${XTS_ALLOCATOR_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+list:
+  description: |
+    List devices with optional query and state filtering (recommended for large fleets)
+
+    Usage:
+      xts allocator list
+      xts allocator list <query>
+      xts allocator list <query> --free|--busy|--allocated|--maintenance|--testing|--offline|--resetting
+      xts allocator list --state=<state> <query>
+
+    Examples:
+      xts allocator list xione --free
+      xts allocator list llama --busy
+      xts allocator list --state=allocated
+
+    Shows: target, state, labels, and slot contents count
+  command: |
+    STATE=""
+    QUERY=""
+    for arg in "$@"; do
+      case "$arg" in
+        --free) STATE="free" ;;
+        --busy) STATE="busy" ;;
+        --allocated) STATE="allocated" ;;
+        --maintenance) STATE="maintenance" ;;
+        --testing) STATE="testing" ;;
+        --offline) STATE="offline" ;;
+        --resetting) STATE="resetting" ;;
+        --state=*) STATE="${arg#--state=}" ;;
+        *)
+          if [ -z "$QUERY" ]; then
+            QUERY="$arg"
+          else
+            QUERY="$QUERY $arg"
+          fi
+          ;;
+      esac
+    done
+
+    if [ -z "$STATE" ] && [ -z "$QUERY" ]; then
+      curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots | {{format_device_list}}
+    else
+      PAYLOAD=$(STATE="$STATE" QUERY="$QUERY" python3 -c "import json, os; payload={}; state=os.environ.get('STATE','').strip(); query=os.environ.get('QUERY','').strip(); payload.update({'state': state} if state else {}); payload.update({'query': query} if query else {}); print(json.dumps(payload))")
+      curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
+        -H "Content-Type: application/json" \
+        -d "$PAYLOAD" | {{format_device_list}}
+    fi
+  params:
+    passthrough: true
+
+list_targets:
+  description: |
+    List target identifiers for quick allocation (copy/paste into alloc_by_target)
+
+    Usage: xts allocator list_targets
+  command: |
+    curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots | jq -r '
+      "\n\u001b[1m\u001b[96mTargets (\(.slots | length)):\u001b[0m\n",
+      "\u001b[1mID   Target                                State        Owner\u001b[0m",
+      "────────────────────────────────────────────────────────────────────────────",
+      (.slots[] |
+        "\u001b[96m\(.slot_id | tostring | .[0:4])\u001b[0m \((.target_id // ((.platform // \"unknown\") + \"@\" + (.rackName // \"-\") + \"/\" + (.slotName // \"-\")))[0:36] | . + (\" \" * (36 - length))) \((.state // \"unknown\")[0:12] | . + (\" \" * (12 - length))) \((.owner_email // \"-\")[0:20])"
+      )
+    '
+
+list_racks:
+  description: |
+    List all racks with device counts
+    
+    Usage: xts allocator list_racks
+    
+    Shows: Rack names and number of devices in each
+  command: curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_racks | {{format_rack_list}}
+
+list_free:
+  description: |
+    List only available (free) devices
+    
+    Usage: xts allocator list_free
+    
+    Example: xts allocator list_free
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
+      -H "Content-Type: application/json" \
+      -d '{"state": "free"}' | jq -r '
+      "\n\u001b[1m\u001b[96mFree Devices (\(.slots | length)):\u001b[0m\n",
+      "\u001b[1mID   Slot Name            Platform             State        Owner                     Expires\u001b[0m",
+      "────────────────────────────────────────────────────────────────────────────────────────────────────",
+      (.slots[] | 
+        "\u001b[96m\(.slot_id | tostring | .[0:4])\u001b[0m \(.slotName[0:20] | . + (" " * (20 - length))) \(.platform[0:20] | . + (" " * (20 - length))) \u001b[92m\(.state)        \u001b[0m \(if .owner_email then (.owner_email[0:25] | . + (" " * (25 - length))) else "-                        " end) \(if .allocation_expiry then (.allocation_expiry[0:20] | . + (" " * (20 - length))) else "-" end)"
+      )
+    '
+
+list_allocated:
+  description: |
+    List currently allocated devices
+    
+    Usage: xts allocator list_allocated
+    
+    Shows: Who has allocated which devices and when they expire
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
+      -H "Content-Type: application/json" \
+      -d '{"state": "allocated"}' | jq -r '
+      "\n\u001b[1m\u001b[96mAllocated Devices (\(.slots | length)):\u001b[0m\n",
+      "\u001b[1mID   Slot Name            Platform             State        Owner                     Expires\u001b[0m",
+      "────────────────────────────────────────────────────────────────────────────────────────────────────",
+      (.slots[] | 
+        "\u001b[96m\(.slot_id | tostring | .[0:4])\u001b[0m \(.slotName[0:20] | . + (" " * (20 - length))) \(.platform[0:20] | . + (" " * (20 - length))) \u001b[93m\(.state)    \u001b[0m \(if .owner_email then (.owner_email[0:25] | . + (" " * (25 - length))) else "-                        " end) \(if .allocation_expiry then (.allocation_expiry[0:20] | . + (" " * (20 - length))) else "-" end)"
+      )
+    '
+
+list_by_platform:
+  description: |
+    List devices filtered by platform
+    
+    Usage: xts allocator list_by_platform <platform>
+    
+    Examples:
+      xts allocator list_by_platform alpha.uk
+      xts allocator list_by_platform beta.us
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots \
+      -H "Content-Type: application/json" \
+      -d "{\"platform\": \"$1\"}" | {{format_device_list}}
+  params:
+    passthrough: true
+
+search_by_rack:
+  description: |
+    Find devices in a specific rack
+    
+    Usage: xts allocator search_by_rack <rack_name>
+    
+    Examples:
+      xts allocator search_by_rack rack-a
+      xts allocator search_by_rack test-rack-1
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"rack_name\": \"$1\"}" | {{format_search_results}}
+  params:
+    passthrough: true
+
+search_by_platform:
+  description: |
+    Find devices by platform type
+    
+    Usage: xts allocator search_by_platform <platform>
+    
+    Examples:
+      xts allocator search_by_platform alpha.uk
+      xts allocator search_by_platform beta.us
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"platform\": \"$1\"}" | {{format_search_results}}
+  params:
+    passthrough: true
+
+search_by_tags:
+  description: |
+    Find devices matching tags
+    
+    Usage: xts allocator search_by_tags <tags>
+    
+    Examples:
+      xts allocator search_by_tags hdmi
+      xts allocator search_by_tags 4k,production
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"tags\": \"$1\"}" | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    results = data.get('results', [])
+    if not results:
+        print('\\033[93mNo devices found.\\033[0m')
+        sys.exit(0)
+    print(f'\\n\\033[1m\\033[96mDevice List ({len(results)} devices):\\033[0m\\n')
+    print('\\033[1m%-4s %-20s %-20s %-12s %-25s %-20s\\033[0m' % ('ID', 'Slot Name', 'Platform', 'State', 'Owner', 'Expires'))
+    print('─' * 110)
+    for r in results:
+        sid = str(r.get('id', '?'))[:4]
+        name = r.get('slot_name', 'Unknown')[:20]
+        plat = r.get('platform', 'Unknown')[:20]
+        state = r.get('state', 'unknown')
+        owner = (r.get('owner_email') or '-')[:25]
+        exp = r.get('allocation_expiry', '-')[:20]
+        sc = '\\033[92m' if state == 'free' else ('\\033[93m' if state == 'allocated' else '\\033[0m')
+        print('\\033[96m%-4s\\033[0m %-20s %-20s %s%-12s\\033[0m %-25s %-20s' % (sid, name, plat, sc, state, owner, exp))
+    print('\\n' + '─' * 110)
+    print('\\033[2mUse xts allocator list --verbose for more details\\033[0m')
+    free = sum(1 for r in results if r.get('state') == 'free')
+    alloc = sum(1 for r in results if r.get('state') == 'allocated')
+    print(f'\\n\\033[1mSummary:\\033[0m \\033[92m{free} free\\033[0m, \\033[93m{alloc} allocated\\033[0m')
+    "
+  params:
+    passthrough: true
+
+search_boxes:
+  description: |
+    Free-text search across platform, rack, slot, labels/tags, make/model, and description
+
+    Usage: xts allocator search_boxes <query>
+
+    Examples:
+      xts allocator search_boxes pi4
+      xts allocator search_boxes camera
+      xts allocator search_boxes testrack1
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"query\": \"$1\"}" | {{format_search_results}}
+  params:
+    passthrough: true
+
+search_by_label:
+  description: |
+    Search boxes by labels (alias of tags)
+
+    Usage: xts allocator search_by_label <label>
+
+    Examples:
+      xts allocator search_by_label camera
+      xts allocator search_by_label ir
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"labels\": [\"$1\"]}" | {{format_search_results}}
+  params:
+    passthrough: true
+
+search_by_equipment:
+  description: |
+    Search boxes by slot contents/external equipment (e.g., camera, ir_blaster, amp, fan)
+
+    Usage: xts allocator search_by_equipment <equipment>
+
+    Examples:
+      xts allocator search_by_equipment camera
+      xts allocator search_by_equipment ir_blaster
+      xts allocator search_by_equipment fan
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/devices/search \
+      -H "Content-Type: application/json" \
+      -d "{\"has_equipment_type\": \"$1\"}" | {{format_search_results}}
+  params:
+    passthrough: true
+
+describe_box:
+  description: |
+    Show full box/rack-slot details including labels and slot contents
+
+    Usage: xts allocator describe_box <id|target_id>
+
+    Examples:
+      xts allocator describe_box 5
+      xts allocator describe_box Cisco@TestRack1/Slot1
+  command: |
+    curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots | python3 -c "
+    import sys, json
+    q = sys.argv[1].strip().lower()
+    data = json.load(sys.stdin)
+    slots = data.get('slots', [])
+    matches = []
+    for s in slots:
+      sid = str(s.get('id') or s.get('slot_id'))
+      target = (s.get('target_id') or '').lower()
+      if q == sid or q == target or q in target:
+        matches.append(s)
+    if not matches:
+      print('\\033[93mNo box found for query:\\033[0m', sys.argv[1])
+      sys.exit(0)
+    s = matches[0]
+    print('\\n\\033[1m\\033[96mBox Details\\033[0m\\n')
+    print('ID:            ', s.get('id') or s.get('slot_id'))
+    print('Target:        ', s.get('target_id'))
+    print('Rack/Slot:     ', f\"{s.get('rackName')}/{s.get('slotName')}\")
+    print('Platform:      ', s.get('platform'))
+    print('State:         ', s.get('state'))
+    print('Owner:         ', s.get('owner_email') or '-')
+    print('Labels:        ', ', '.join(s.get('labels') or s.get('tags') or []) or '-')
+    print('Description:   ', s.get('description') or '-')
+    print('Make/Model:    ', f\"{s.get('make') or '-'} / {s.get('model') or '-'}\")
+    contents = s.get('slot_contents') or s.get('external_equipment') or []
+    print('\\nSlot Contents:')
+    if not contents:
+      print('  - (none)')
+    else:
+      for item in contents:
+        if isinstance(item, dict):
+          item_type = item.get('type') or 'item'
+          name = item.get('name') or ''
+          model = item.get('model') or ''
+          details = ' '.join(x for x in [name, model] if x).strip()
+          print(f\"  - {item_type}: {details}\" if details else f\"  - {item_type}\")
+        else:
+          print(f\"  - {item}\")
+    print()
+    " "$1"
+  params:
+    passthrough: true
+
+get_state:
+  description: |
+    Get current state and ownership for a single device
+
+    Usage: xts allocator get_state <device_id>
+
+    Examples:
+      xts allocator get_state 5
+      xts allocator get_state 12
+  command: |
+    curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/list_slots | jq --arg id "$1" '
+      (.slots // []) as $slots
+      | ($slots | map(select((.id // .slot_id) == ($id|tonumber)))) as $matches
+      | if ($matches | length) == 0 then
+          {"error":"Device not found","device_id":($id|tonumber)}
+        else
+          ($matches[0] | {
+            device_id: (.id // .slot_id),
+            rack: .rackName,
+            slot: .slotName,
+            platform: .platform,
+            state: .state,
+            owner_email: .owner_email,
+            allocation_type: .allocation_type,
+            allocation_expiry: .allocation_expiry
+          })
+        end
+    '
+  params:
+    passthrough: true
+
+valid_states:
+  description: |
+    Show valid next states for a device based on its current state
+
+    Usage: xts allocator valid_states <device_id>
+
+    Examples:
+      xts allocator valid_states 5
+      xts allocator valid_states 12
+  command: |
+    curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/device/$1/valid_states
+  params:
+    passthrough: true
+
+set_state:
+  description: |
+    Change device state (admin token required)
+
+    Usage: xts allocator set_state <device_id> <state>
+
+    Examples:
+      xts allocator set_state 5 maintenance
+      xts allocator set_state 5 free
+      xts allocator set_state 8 busy
+
+    Valid states:
+      free, allocated, testing, busy, resetting, maintenance, offline
+  command: |
+    TOKEN="${XTS_ALLOCATOR_ADMIN_TOKEN:-${XTS_ALLOCATOR_TOKEN:-}}"
+    if [ -z "$TOKEN" ]; then
+      echo "Error: set_state requires admin token."
+      echo "Set XTS_ALLOCATOR_ADMIN_TOKEN (or XTS_ALLOCATOR_TOKEN) and retry."
+      exit 1
+    fi
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/change_device_state \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"device_id\": $1, \"state\": \"$2\"}"
+  params:
+    passthrough: true
+
+start_test:
+  description: |
+    Start a test execution on an allocated device (engineer/admin token required)
+
+    Usage: xts allocator start_test <device_id> <test_name> [expected_duration_minutes] [test_suite]
+
+    Examples:
+      xts allocator start_test 5 smoke_boot 20 smoke
+      xts allocator start_test 8 hdmi_audio_4k 45
+  command: |
+    if [ -z "${XTS_ALLOCATOR_TOKEN:-}" ]; then
+      echo "Error: start_test requires XTS_ALLOCATOR_TOKEN."
+      exit 1
+    fi
+    EXPECTED_DURATION="${3:-60}"
+    TEST_SUITE="${4:-xts}"
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/start_test \
+      -H "Authorization: Bearer ${XTS_ALLOCATOR_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "{\"device_id\": $1, \"test_name\": \"$2\", \"test_suite\": \"$TEST_SUITE\", \"expected_duration\": $EXPECTED_DURATION, \"user_email\": \"${XTS_ALLOCATOR_USER_EMAIL:-}\"}"
+  params:
+    passthrough: true
+
+list_active_tests:
+  description: |
+    List currently running tests with elapsed runtime
+
+    Usage: xts allocator list_active_tests [limit]
+
+    Examples:
+      xts allocator list_active_tests
+      xts allocator list_active_tests 100
+  command: |
+    LIMIT="${1:-50}"
+    curl -s "${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/test_executions?active_only=true&limit=$LIMIT" | jq -r '
+      if (.test_executions | length) == 0 then
+        "\u001b[93mNo active tests.\u001b[0m"
+      else
+        "\n\u001b[1m\u001b[96mActive Tests (\(.test_executions | length)):\u001b[0m\n",
+        "\u001b[1mTest ID  Device  Test Name                      Suite                Status      Elapsed(min)\u001b[0m",
+        "────────────────────────────────────────────────────────────────────────────────────────────────",
+        (.test_executions[] |
+          "\(.id | tostring | .[0:7] | . + (\" \" * (7 - length)))   \(.device_id | tostring | . + (\" \" * (6 - length))) \(.test_name[0:30] | . + (\" \" * (30 - length))) \((.test_suite // \"-\")[0:20] | . + (\" \" * (20 - length))) \((.status // \"running\")[0:10] | . + (\" \" * (10 - length))) \(((now - (.start_time | fromdateiso8601))/60 | floor))"
+        )
+      end
+    '
+  params:
+    passthrough: true
+
+active_test:
+  description: |
+    Get currently running test (if any) for a specific device
+
+    Usage: xts allocator active_test <device_id>
+
+    Examples:
+      xts allocator active_test 5
+      xts allocator active_test 12
+  command: |
+    curl -s "${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/test_executions?device_id=$1&active_only=true&limit=1" | jq -r --arg id "$1" '
+      if (.test_executions | length) == 0 then
+        {"message":"No active test","device_id":($id|tonumber)}
+      else
+        (.test_executions[0] | . + {elapsed_minutes: ((now - (.start_time | fromdateiso8601)) / 60 | floor)})
+      end
+    '
+  params:
+    passthrough: true
+
+heartbeat_test:
+  description: |
+    Send heartbeat for an active test execution
+
+    Usage: xts allocator heartbeat_test <test_execution_id>
+
+    Example:
+      xts allocator heartbeat_test 42
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/test_heartbeat \
+      -H "Content-Type: application/json" \
+      -d "{\"test_execution_id\": $1}"
+  params:
+    passthrough: true
+
+heartbeat_device:
+  description: |
+    Send test heartbeat using device_id lookup for the active test
+
+    Usage: xts allocator heartbeat_device <device_id>
+
+    Example:
+      xts allocator heartbeat_device 5
+  command: |
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/test_heartbeat \
+      -H "Content-Type: application/json" \
+      -d "{\"device_id\": $1}"
+  params:
+    passthrough: true
+
+end_test:
+  description: |
+    End an active test execution (engineer/admin token required)
+
+    Usage: xts allocator end_test <test_execution_id> [status] [exit_code]
+
+    Examples:
+      xts allocator end_test 42 success 0
+      xts allocator end_test 42 failure 1
+      xts allocator end_test 42 timeout
+  command: |
+    if [ -z "${XTS_ALLOCATOR_TOKEN:-}" ]; then
+      echo "Error: end_test requires XTS_ALLOCATOR_TOKEN."
+      exit 1
+    fi
+    STATUS="${2:-success}"
+    PAYLOAD="{\"test_execution_id\": $1, \"status\": \"$STATUS\""
+    if [ -n "${3:-}" ]; then
+      PAYLOAD="$PAYLOAD, \"exit_code\": $3"
+    fi
+    PAYLOAD="$PAYLOAD}"
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/end_test \
+      -H "Authorization: Bearer ${XTS_ALLOCATOR_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+report_heartbeat:
+  description: |
+    Report device heartbeat/status from test harness or agent
+
+    Usage: xts allocator report_heartbeat <device_id> <connectivity_status> [software_version]
+
+    Examples:
+      xts allocator report_heartbeat 5 online 24.1.3
+      xts allocator report_heartbeat 8 degraded
+  command: |
+    PAYLOAD="{\"device_id\": $1, \"connectivity_status\": \"$2\""
+    if [ -n "${3:-}" ]; then
+      PAYLOAD="$PAYLOAD, \"software_version\": \"$3\""
+    fi
+    PAYLOAD="$PAYLOAD}"
+    curl -s -X POST ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/report_status \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+  params:
+    passthrough: true
+
+box_heartbeat:
+  description: |
+    Get box heartbeat details and current allocation/test context
+
+    Usage: xts allocator box_heartbeat <device_id>
+
+    Example:
+      xts allocator box_heartbeat 5
+  command: |
+    curl -s ${XTS_ALLOCATOR_SERVER:-http://localhost:5000}/device/$1/usage_stats | jq '{
+      device_id,
+      rack,
+      slot,
+      platform,
+      current_state,
+      current_owner,
+      connectivity_status,
+      last_seen,
+      allocation_type
+    }'
+  params:
+    passthrough: true
+
+status:
+  description: |
+    Check if allocator server is responding
+    
+    Usage: xts allocator status
+    
+    Returns: Server availability and basic info
+  command: |
+    SERVER="${XTS_ALLOCATOR_SERVER:-http://localhost:5000}"
+    printf "\n\033[1m\033[96mXTS Allocator Server Status\033[0m\n"
+    printf "\033[1mServer:\033[0m $SERVER\n"
+    printf "\n"
+    
+    # Try to get rack list
+    RESPONSE=$(curl -s -w "\n%{http_code}" "$SERVER/list_racks" 2>&1)
+    HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+    BODY=$(echo "$RESPONSE" | sed '$d')
+    
+    if [ "$HTTP_CODE" = "200" ]; then
+      printf "\033[92m✓ Server is online\033[0m\n"
+      printf "\n"
+      
+      # Parse and display rack info
+      RACK_COUNT=$(echo "$BODY" | grep -o '"name"' | wc -l)
+      printf "\033[1mRacks:\033[0m $RACK_COUNT registered\n"
+      
+      # Try to get device count
+      DEVICE_RESPONSE=$(curl -s "$SERVER/list_slots" 2>&1)
+      if [ $? -eq 0 ]; then
+        TOTAL=$(echo "$DEVICE_RESPONSE" | grep -o '"slot_id"' | wc -l)
+        FREE=$(echo "$DEVICE_RESPONSE" | grep -c '"state"[[:space:]]*:[[:space:]]*"free"')
+        ALLOCATED=$(echo "$DEVICE_RESPONSE" | grep -c '"state"[[:space:]]*:[[:space:]]*"allocated"')
+        printf "\033[1mDevices:\033[0m $TOTAL total (\033[92m$FREE free\033[0m, \033[93m$ALLOCATED allocated\033[0m)\n"
+      fi
+    else
+      printf "\033[91m✗ Server is offline or unreachable\033[0m\n"
+      printf "\033[2mHTTP Status: $HTTP_CODE\033[0m\n"
+      exit 1
+    fi
+    printf "\n"

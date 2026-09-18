@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Database Mode Switcher
+# Switches between test and production databases
+
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+usage() {
+    cat << EOF
+${BLUE}XTS Allocator - Database Mode Switcher${NC}
+
+Switches between test and production database modes.
+
+${GREEN}Usage:${NC}
+    $(basename $0) <mode>
+
+${GREEN}Modes:${NC}
+    test         - Switch to test database (xts_allocator_test.db)
+    development  - Switch to development database (xts_allocator.db)
+    production   - Switch to production database (PostgreSQL or main SQLite)
+
+${GREEN}Examples:${NC}
+    $(basename $0) test          # Switch to test mode
+    $(basename $0) development   # Switch to development mode
+    $(basename $0) production    # Switch to production mode
+
+${YELLOW}Note:${NC} This sets XTS_MODE environment variable. For permanent setting,
+add to your shell profile or use systemd environment files.
+
+EOF
+    exit 1
+}
+
+set_mode() {
+    local mode=$1
+    
+    case $mode in
+        test)
+            export XTS_MODE=test
+            export SQLITE_DB_PATH=xts_allocator_test.db
+            echo -e "${GREEN}✓${NC} Switched to TEST mode"
+            echo -e "  Database: ${YELLOW}xts_allocator_test.db${NC}"
+            echo -e "  ${BLUE}→${NC} You can safely rebuild this database during testing"
+            ;;
+        development)
+            export XTS_MODE=development
+            export SQLITE_DB_PATH=xts_allocator.db
+            echo -e "${GREEN}✓${NC} Switched to DEVELOPMENT mode"
+            echo -e "  Database: ${YELLOW}xts_allocator.db${NC}"
+            echo -e "  ${BLUE}→${NC} This is your working database"
+            ;;
+        production)
+            export XTS_MODE=production
+            if [ -n "$POSTGRES_HOST" ]; then
+                echo -e "${GREEN}✓${NC} Switched to PRODUCTION mode"
+                echo -e "  Database: ${YELLOW}PostgreSQL${NC}"
+                echo -e "  ${BLUE}→${NC} Using PostgreSQL at $POSTGRES_HOST"
+            else
+                export SQLITE_DB_PATH=xts_allocator.db
+                echo -e "${GREEN}✓${NC} Switched to PRODUCTION mode"
+                echo -e "  Database: ${YELLOW}xts_allocator.db${NC}"
+                echo -e "  ${YELLOW}⚠${NC}  No PostgreSQL configured, using SQLite"
+            fi
+            ;;
+        *)
+            echo -e "${RED}Error:${NC} Invalid mode '$mode'"
+            usage
+            ;;
+    esac
+    
+    # Export for subprocesses
+    export XTS_MODE
+    
+    # Show current status
+    echo ""
+    echo -e "${BLUE}Current Configuration:${NC}"
+    echo -e "  XTS_MODE:        ${GREEN}$XTS_MODE${NC}"
+    echo -e "  SQLITE_DB_PATH:  ${YELLOW}${SQLITE_DB_PATH:-<not set>}${NC}"
+    echo -e "  DB_TYPE:         ${YELLOW}${DB_TYPE:-sqlite}${NC}"
+    
+    # Check if server is running
+    if pgrep -f "python.*app.py" > /dev/null; then
+        echo ""
+        echo -e "${YELLOW}⚠${NC}  Server is running! Restart to apply changes:"
+        echo -e "    ${BLUE}./stop.sh && ./run.sh${NC}"
+    fi
+}
+
+# Main
+if [ $# -eq 0 ]; then
+    usage
+fi
+
+cd "$PROJECT_ROOT"
+set_mode "$1"

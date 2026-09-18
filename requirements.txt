@@ -1,4 +1,13 @@
 sanic==24.6.0
 SQLAlchemy==2.0.36
 requests==2.31.0
+httpx==0.27.0
 pyinstaller==6.11.1
+alembic==1.13.1
+click==8.1.7
+PyYAML==6.0.2
+pytest==8.0.0
+pytest-asyncio==0.23.5
+sanic-testing==24.6.0
+PyJWT==2.8.0
+psycopg2-binary==2.9.9

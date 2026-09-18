@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""Standalone CLI for triggering the XTS allocator server's REST API
+without needing the xts/xts_core toolchain installed.
+
+This is the canonical "drive the allocator independently" entry point —
+useful for ops, local testing, smoke tests, and as a reference
+implementation of the HTTP contract that xts_core's plugin and the
+allocator.xts shell snippets also speak.
+
+Environment:
+  ALLOCATOR_URL   Base URL of the allocator (default: http://localhost:5000)
+  ALLOCATOR_EMAIL User email passed in the request body for endpoints
+                  that take it (default: $USER@localhost, or "anonymous@localhost")
+  ALLOCATOR_TOKEN JWT for write endpoints that require auth (optional)
+
+Stdlib-only: argparse + urllib + json + os + sys. No pip dependencies,
+runs in any Python 3.8+ environment.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+def _default_email() -> str:
+    user = os.environ.get("USER") or "anonymous"
+    return f"{user}@localhost"
+
+
+SERVER = os.environ.get("ALLOCATOR_URL", "http://localhost:5000").rstrip("/")
+EMAIL = os.environ.get("ALLOCATOR_EMAIL", _default_email())
+TOKEN = os.environ.get("ALLOCATOR_TOKEN")
+
+
+def _request(method: str, path: str, body=None, params=None) -> tuple[int, dict | str]:
+    url = f"{SERVER}{path}"
+    if params:
+        qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+        if qs:
+            url = f"{url}?{qs}"
+    data = None
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if TOKEN:
+        headers["Authorization"] = f"Bearer {TOKEN}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            payload = resp.read().decode("utf-8")
+            try:
+                return resp.status, json.loads(payload)
+            except json.JSONDecodeError:
+                return resp.status, payload
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        try:
+            return e.code, json.loads(body)
+        except json.JSONDecodeError:
+            return e.code, body
+    except urllib.error.URLError as e:
+        print(f"error: cannot reach {url}: {e.reason}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _emit(status: int, payload) -> int:
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0 if 200 <= status < 300 else 1
+
+
+# ── subcommand handlers ──────────────────────────────────────────────
+
+
+def cmd_health(_args) -> int:
+    status, payload = _request("GET", "/health")
+    return _emit(status, payload)
+
+
+def cmd_list_slots(args) -> int:
+    if args.platform or args.tags or args.query or args.state:
+        body = {}
+        if args.platform:
+            body["platform"] = args.platform
+        if args.tags:
+            body["tags"] = args.tags
+        if args.query:
+            body["query"] = args.query
+        if args.state:
+            body["state"] = args.state
+        status, payload = _request("POST", "/list_slots", body=body)
+    else:
+        status, payload = _request("GET", "/list_slots")
+    return _emit(status, payload)
+
+
+def cmd_add_slot(args) -> int:
+    body = {
+        "rackName": args.rack,
+        "slotName": args.slot,
+        "platform": args.platform or "",
+        "description": args.description or "",
+        "tags": args.tags or [],
+    }
+    if args.owner_email:
+        body["owner_email"] = args.owner_email
+    status, payload = _request("POST", "/add_slot", body=body)
+    return _emit(status, payload)
+
+
+def cmd_allocate(args) -> int:
+    slot = {}
+    if args.id is not None:
+        slot["id"] = args.id
+    elif args.target:
+        slot["target_id"] = args.target
+    elif args.platform:
+        slot["platform"] = args.platform
+        if args.tags:
+            slot["tags"] = args.tags
+    else:
+        print("error: one of --id / --target / --platform required", file=sys.stderr)
+        return 2
+    body = {"user": {"email": EMAIL}, "slot": slot}
+    if args.duration:
+        body["duration"] = args.duration
+    status, payload = _request("POST", "/allocate_slot", body=body)
+    return _emit(status, payload)
+
+
+def cmd_dealloc(args) -> int:
+    body = {"user": {"email": EMAIL}, "slot": {"id": args.id}}
+    status, payload = _request("POST", "/deallocate_slot", body=body)
+    return _emit(status, payload)
+
+
+def cmd_box_status(args) -> int:
+    status, payload = _request("GET", f"/device/{args.device_id}/box_status")
+    return _emit(status, payload)
+
+
+def cmd_start_test(args) -> int:
+    body = {
+        "device_id": args.device_id,
+        "test_name": args.name,
+        "test_suite": args.suite,
+        "user_email": EMAIL,
+    }
+    status, payload = _request("POST", "/start_test", body=body)
+    return _emit(status, payload)
+
+
+def cmd_end_test(args) -> int:
+    body = {"test_execution_id": args.execution_id, "status": args.status}
+    status, payload = _request("POST", "/end_test", body=body)
+    return _emit(status, payload)
+
+
+def cmd_heartbeat(args) -> int:
+    """POST /test_heartbeat — keep an in-flight test execution alive."""
+    body = {}
+    if args.execution_id is not None:
+        body["test_execution_id"] = args.execution_id
+    if args.device_id is not None:
+        body["device_id"] = args.device_id
+    status, payload = _request("POST", "/test_heartbeat", body=body)
+    return _emit(status, payload)
+
+
+def cmd_smoke(args) -> int:
+    """End-to-end smoke: hits every important endpoint in order and returns
+    non-zero on the first failure. Equivalent to driving the full allocator
+    lifecycle from scratch — without xts, without the .xts file, without
+    any external tooling. Use to verify a fresh deploy.
+
+    Auth: if ALLOCATOR_TOKEN is already set, uses it. Otherwise auto-logs in
+    via POST /login with --email / --password (defaults to the engineer DEMO
+    credentials so a freshly-booted server with the default user table just
+    works)."""
+    global TOKEN, EMAIL
+    # For the smoke flow we use the login email for both auth and
+    # request-body user identity so the email regex accepts it.
+    EMAIL = args.email
+    failures = []
+
+    def step(label: str, status: int, payload, *, expect=(200,), require_keys=()):
+        ok = status in expect and all(k in (payload or {}) for k in require_keys)
+        mark = "ok" if ok else "FAIL"
+        print(f"[{mark}] {label} (HTTP {status})", file=sys.stderr)
+        if not ok:
+            failures.append((label, status, payload))
+        return payload if ok else None
+
+    # 0. login if no token provided
+    if not TOKEN:
+        s, p = _request("POST", "/login", body={"email": args.email, "password": args.password})
+        login_payload = step("login", s, p, require_keys=("access_token",))
+        if login_payload is None:
+            return _smoke_exit(failures)
+        TOKEN = login_payload["access_token"]
+
+    # 1. health
+    s, p = _request("GET", "/health")
+    step("health", s, p, expect=(200, 503))  # 200 healthy or 503 degraded both ack
+
+    # 2. /allocator.xts served (xts_core contract)
+    s, p = _request("GET", "/allocator.xts")
+    step("allocator.xts served", s, p)
+
+    # 3. add a temporary rack+slot for the smoke test
+    # Suffix with a per-run id so re-running smoke doesn't hit the
+    # devices.(rack_id, slot_name) uniqueness constraint.
+    import time
+    run_id = str(int(time.time()))
+    rack_name = f"{args.rack}-{run_id}"
+    slot_name = f"{args.slot}-{run_id}"
+    s, p = _request("POST", "/add_slot", body={
+        "rackName": rack_name, "slotName": slot_name,
+        "platform": args.platform, "tags": ["smoke"]
+    })
+    add_payload = step("add_slot", s, p, expect=(200, 201))
+    if add_payload is None:
+        return _smoke_exit(failures)
+
+    # 4. list_slots includes the new slot
+    s, p = _request("GET", "/list_slots")
+    list_payload = step("list_slots", s, p, require_keys=("slots",))
+    if list_payload is not None:
+        new_slot = next(
+            (d for d in list_payload["slots"]
+             if d.get("rackName") == rack_name and d.get("slotName") == slot_name),
+            None,
+        )
+        if not new_slot:
+            failures.append(("list_slots contains new slot", 200, "missing"))
+            return _smoke_exit(failures)
+        slot_id = new_slot["slot_id"]
+
+        # 5. allocate by id
+        s, p = _request("POST", "/allocate_slot", body={
+            "user": {"email": EMAIL}, "slot": {"id": slot_id}
+        })
+        alloc = step("allocate_slot", s, p, require_keys=("slot_id", "state", "allocation_history_id"))
+        if alloc is None:
+            return _smoke_exit(failures)
+
+        # 6. start a test
+        s, p = _request("POST", "/start_test", body={
+            "device_id": slot_id, "test_name": "smoke",
+            "test_suite": "bin/allocator", "user_email": EMAIL
+        })
+        start = step("start_test", s, p, require_keys=("test_execution_id",))
+
+        # 7. heartbeat
+        if start is not None:
+            s, p = _request("POST", "/test_heartbeat", body={
+                "test_execution_id": start["test_execution_id"]
+            })
+            step("test_heartbeat", s, p)
+
+            # 8. box_status reports the active test
+            s, p = _request("GET", f"/device/{slot_id}/box_status")
+            bs = step("box_status", s, p, require_keys=("state", "active_test"))
+            if bs is not None and bs.get("state") != "testing":
+                failures.append(("box_status state == testing", 200, bs))
+
+            # 9. end the test
+            s, p = _request("POST", "/end_test", body={
+                "test_execution_id": start["test_execution_id"], "status": "success"
+            })
+            step("end_test", s, p)
+
+        # 10. dealloc
+        s, p = _request("POST", "/deallocate_slot", body={
+            "user": {"email": EMAIL}, "slot": {"id": slot_id}
+        })
+        step("deallocate_slot", s, p)
+
+    return _smoke_exit(failures)
+
+
+def _smoke_exit(failures):
+    if failures:
+        print(f"\nFAILED: {len(failures)} step(s) failed", file=sys.stderr)
+        for label, status, payload in failures:
+            print(f"  - {label}: HTTP {status} {json.dumps(payload, default=str)[:200]}", file=sys.stderr)
+        return 1
+    print("\nPASSED: all smoke steps green", file=sys.stderr)
+    return 0
+
+
+def cmd_xts(_args) -> int:
+    """Dump the served allocator.xts file. Mirrors what xts_core would fetch."""
+    status, payload = _request("GET", "/allocator.xts")
+    if isinstance(payload, dict):
+        print(json.dumps(payload, indent=2))
+    else:
+        print(payload)
+    return 0 if 200 <= status < 300 else 1
+
+
+# ── argparse wiring ──────────────────────────────────────────────────
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="allocator",
+        description="Direct CLI for the XTS allocator REST API (no xts needed).",
+        epilog="ENV: ALLOCATOR_URL, ALLOCATOR_EMAIL, ALLOCATOR_TOKEN",
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("health", help="GET /health").set_defaults(func=cmd_health)
+
+    ls = sub.add_parser("list-slots", help="GET /list_slots, or POST /list_slots with filters")
+    ls.add_argument("--platform")
+    ls.add_argument("--tags", nargs="+")
+    ls.add_argument("--query")
+    ls.add_argument("--state")
+    ls.set_defaults(func=cmd_list_slots)
+
+    add = sub.add_parser("add-slot", help="POST /add_slot")
+    add.add_argument("--rack", required=True)
+    add.add_argument("--slot", required=True)
+    add.add_argument("--platform")
+    add.add_argument("--description")
+    add.add_argument("--tags", nargs="+")
+    add.add_argument("--owner-email")
+    add.set_defaults(func=cmd_add_slot)
+
+    alloc = sub.add_parser("allocate", help="POST /allocate_slot")
+    alloc.add_argument("--id", type=int, help="specific slot id")
+    alloc.add_argument("--target", help="target_id (platform@rack/slot)")
+    alloc.add_argument("--platform", help="match by platform")
+    alloc.add_argument("--tags", nargs="+")
+    alloc.add_argument("--duration", help="e.g. 30m, 2h, 90m")
+    alloc.set_defaults(func=cmd_allocate)
+
+    dealloc = sub.add_parser("dealloc", help="POST /deallocate_slot")
+    dealloc.add_argument("--id", type=int, required=True)
+    dealloc.set_defaults(func=cmd_dealloc)
+
+    bs = sub.add_parser("box-status", help="GET /device/<id>/box_status (compact polling)")
+    bs.add_argument("device_id", type=int)
+    bs.set_defaults(func=cmd_box_status)
+
+    st = sub.add_parser("start-test", help="POST /start_test")
+    st.add_argument("device_id", type=int)
+    st.add_argument("--name", required=True)
+    st.add_argument("--suite")
+    st.set_defaults(func=cmd_start_test)
+
+    et = sub.add_parser("end-test", help="POST /end_test")
+    et.add_argument("execution_id", type=int)
+    et.add_argument("--status", default="success", choices=["success", "failure", "error", "timeout"])
+    et.set_defaults(func=cmd_end_test)
+
+    hb = sub.add_parser("heartbeat", help="POST /test_heartbeat (keep an active test alive)")
+    hb.add_argument("--execution-id", type=int, dest="execution_id")
+    hb.add_argument("--device-id", type=int, dest="device_id")
+    hb.set_defaults(func=cmd_heartbeat)
+
+    sm = sub.add_parser(
+        "smoke",
+        help="end-to-end smoke: health → add-slot → allocate → start/heartbeat/end test → dealloc. "
+             "Drives the entire test-execution lifecycle without xts. Non-zero exit on any step failure.",
+    )
+    sm.add_argument("--rack", default="smoke-rack")
+    sm.add_argument("--slot", default="smoke-slot")
+    sm.add_argument("--platform", default="smoke-platform")
+    sm.add_argument("--email", default="engineer@example.com",
+                    help="login email (default: DEMO engineer; override for real deployments)")
+    sm.add_argument("--password", default="engineer123",
+                    help="login password (default: DEMO engineer123; override for real deployments)")
+    sm.set_defaults(func=cmd_smoke)
+
+    sub.add_parser("xts", help="GET /allocator.xts (raw command-surface file)").set_defaults(func=cmd_xts)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
